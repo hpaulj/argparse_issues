@@ -1594,7 +1594,9 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                  fromfile_prefix_chars=None,
                  argument_default=None,
                  conflict_handler='error',
-                 add_help=True):
+                 add_help=True,
+                 args_default_to_positional=False,
+                 ):
 
         superinit = super(ArgumentParser, self).__init__
         superinit(description=description,
@@ -1612,6 +1614,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         self.formatter_class = formatter_class
         self.fromfile_prefix_chars = fromfile_prefix_chars
         self.add_help = add_help
+        self.args_default_to_positional = args_default_to_positional
 
         add_group = self.add_argument_group
         self._positionals = add_group(_('positional arguments'))
@@ -2107,12 +2110,20 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             option_tuple, = option_tuples
             return option_tuple
 
-        # if it was not found as an option, but it looks like a negative
-        # number, it was meant to be positional
+        # behave more like optparse even if the argument looks like a option
+        if self.args_default_to_positional:
+            return None
+
+        # if it is not found as an option, but looks like a number
+        # it is meant to be positional
         # unless there are negative-number-like options
-        if self._negative_number_matcher.match(arg_string):
-            if not self._has_negative_number_optionals:
+        # try complex() is more general than self._negative_number_matcher
+        if not self._has_negative_number_optionals:
+            try:
+                complex(arg_string)
                 return None
+            except ValueError:
+                pass
 
         # if it contains a space, it was meant to be a positional
         if ' ' in arg_string:

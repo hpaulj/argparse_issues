@@ -1266,7 +1266,8 @@ class TestOptionLike(ParserTestCase):
     failures = ['-x', '-y2.5', '-xa', '-x -a',
                 '-x -3', '-x -3.5', '-3 -3.5',
                 '-x -2.5', '-x -2.5 a', '-3 -.5',
-                'a x -1', '-x -1 a', '-3 -1 a']
+                'a x -1', '-x -1 a', '-3 -1 a',
+                '-1E3']
     successes = [
         ('', NS(x=None, y=None, z=[])),
         ('-x 2.5', NS(x=2.5, y=None, z=[])),
@@ -1279,8 +1280,176 @@ class TestOptionLike(ParserTestCase):
         ('a -x 1', NS(x=1.0, y=None, z=['a'])),
         ('-x 1 a', NS(x=1.0, y=None, z=['a'])),
         ('-3 1 a', NS(x=None, y=1.0, z=['a'])),
+        # scientific notation should work
+        ('-3-.5e1', NS(x=None, y=-5.0, z=[])),
+        ('-x-0.5e1', NS(x=-5.0, y=None, z=[])),
     ]
 
+class TestScientificComplex(ParserTestCase):
+    """Tests scientific notation and complex"""
+
+    argument_signatures = [
+        Sig('--xdiv', nargs=2, type=float, default=[0,1]),
+        Sig('--zdiv', nargs=2, type=complex, default=argparse.SUPPRESS)
+    ]
+    failures = []
+    successes = [
+        ('', NS(xdiv=[0,1])),
+        ('--xdiv -.5 .5', NS(xdiv=[-0.5, 0.5])),
+        ('--xdiv -5e-1 5e-1', NS(xdiv=[-0.5, 0.5])),
+        ('--zdiv -1e-1-1j 5e1+3j', NS(xdiv=[0,1], zdiv=[(-0.1-1j), (50+3j)])),
+    ]
+
+class TestDefaultToPositional(ParserTestCase):
+    """Tests args_default_to_positional option"""
+
+    parser_signature = Sig(args_default_to_positional=True)
+    argument_signatures = [
+        Sig('--foo', nargs=2),
+        Sig('-a','--asciidoc-opts')
+    ]
+    failures = ['--asciidoc-opts --foo','--asciidoc-opts=--foo --foo - -a',
+    ]
+    successes = [
+        ('', NS(foo=None, asciidoc_opts=None)),
+        ('--foo one two', NS(foo=['one','two'], asciidoc_opts=None)),
+        ('--foo -one two', NS(foo=['-one','two'], asciidoc_opts=None)),
+        ('--asciidoc-opts --safe', NS(asciidoc_opts='--safe', foo=None)),
+        ('--asciidoc-opts=--safe', NS(asciidoc_opts='--safe', foo=None)),
+        ('-a--safe', NS(asciidoc_opts='--safe', foo=None)),
+        ('--asciidoc-opts=--foo --foo - -f', NS(asciidoc_opts='--foo', foo=['-', '-f'])),
+    ]
+
+class TestDefaultToPositionalWithOptionLike(ParserTestCase):
+    """Tests args_default_to_positional option with number-like options
+    compare to TestOptionLike"""
+
+    parser_signature = Sig(args_default_to_positional=True)
+
+    argument_signatures = [
+        Sig('-x', type=float),
+        Sig('-3', type=float, dest='y'),
+        Sig('z', nargs='*'),
+    ]
+    failures = [
+        '-x',
+        '-xa',
+        '-x -a',
+        '-x -3',
+        '-x -3.5',
+        '-3 -3.5',
+        ]
+    successes = [
+        # TestOptionLike successes remain successes
+        ('', NS(x=None, y=None, z=[])),
+        ('-x 2.5', NS(x=2.5, y=None, z=[])),
+        ('-x 2.5 a', NS(x=2.5, y=None, z=['a'])),
+        ('-3.5', NS(x=None, y=0.5, z=[])),
+        ('-3-.5', NS(x=None, y=-0.5, z=[])),
+        ('-3 .5', NS(x=None, y=0.5, z=[])),
+        ('a -3.5', NS(x=None, y=0.5, z=['a'])),
+        ('a', NS(x=None, y=None, z=['a'])),
+        ('a -x 1', NS(x=1.0, y=None, z=['a'])),
+        ('-x 1 a', NS(x=1.0, y=None, z=['a'])),
+        ('-3 1 a', NS(x=None, y=1.0, z=['a'])),
+        ('-3-.5e1', NS(x=None, y=-5.0, z=[])),
+        ('-x-0.5e1', NS(x=-5.0, y=None, z=[])),
+        # failure cases that have become successes
+        ('-y2.5', NS(x=None, y=None, z=['-y2.5'])),
+        ('-x -2.5', NS(x=-2.5, y=None, z=[])),
+        ('-x -2.5 a', NS(x=-2.5, y=None, z=['a'])),
+        ('-3 -.5', NS(x=None, y=-0.5, z=[])),
+        ('a x -1', NS(x=None, y=None, z=['a', 'x', '-1'])),
+        ('-x -1 a', NS(x=-1, y=None, z=['a'])),
+        ('-3 -1 a', NS(x=None, y=-1, z=['a'])),
+        ('-1E3', NS(x=None, y=None, z=['-1E3'])),
+    ]
+
+class TestOptparseLike(ParserTestCase):
+    """optparse TestStandard cases, without positionals"""
+    parser_signature = Sig()
+    # value of args_default_to_positional does not matter
+    argument_signatures = [
+       Sig("-a"),
+       Sig("-b", "--boo", type=int, dest='boo'),
+       Sig("--foo", action="append"),
+    ]
+    failures = ["-a", "-b 5x","--boo13","--boo=x5"]
+    successes = [
+        ('', NS(**{'a': None, 'boo': None, 'foo': None})),
+        # test_shortopt_empty_longopt_append
+        (["-a", "", "--foo=blah", "--foo="], #"-a  --foo=blah --foo=",
+            NS(**{'a': "", 'boo': None, 'foo': ["blah", ""]})),
+        # test_shortopt_empty_longopt_append
+        (["--foo", "bar", "--foo", "", "--foo=x"],
+            NS(**{'a': None, 'boo': None, 'foo': ["bar", "", "x"]})),
+        # test_long_option_append
+        (["--foo", "bar", "--foo", "", "--foo=x"],
+            NS(**{'a': None, 'boo': None, 'foo': ["bar", "", "x"]})),
+        # test_option_argument_joined
+        (["-abc"], NS(**{'a': "bc", 'boo': None, 'foo': None})),
+        # test_option_argument_split
+        (["-a", "34"], NS(**{'a': "34", 'boo': None, 'foo': None})),
+        # test_option_argument_joined_integer
+        (["-b34"], NS(**{'a': None, 'boo': 34, 'foo': None})),
+        # test_option_argument_split_negative_integer
+        (["-b", "-5"], NS(**{'a': None, 'boo': -5, 'foo': None})),
+        # test_long_option_argument_joined
+        (["--boo=13"], NS(**{'a': None, 'boo': 13, 'foo': None})),
+        # test_long_option_argument_split
+        (["--boo", "111"], NS(**{'a': None, 'boo': 111, 'foo': None})),
+        # test_long_option_short_option
+        (["--foo=bar", "-axyz"],
+            NS(**{'a': 'xyz', 'boo': None, 'foo': ["bar"]})),
+        # test_abbrev_long_option
+        (["--f=bar", "-axyz"],
+            NS(**{'a': 'xyz', 'boo': None, 'foo': ["bar"]})),
+        # test_short_and_long_option_split
+        (["-a", "xyz", "--foo", "bar"],
+            NS(**{'a': 'xyz', 'boo': None, 'foo': ["bar"]})),
+        # test_short_option_split_long_option_append
+        (["--foo=bar", "-b", "123", "--foo", "baz"],
+            NS(**{'a': None, 'boo': 123, 'foo': ["bar", "baz"]})),
+    ]
+
+class TestOptparseWithPositionalLike(ParserTestCase):
+    """optparse TestStandard cases, with positionals"""
+    # value of args_default_to_positional does not matter
+    parser_signature = Sig()
+    argument_signatures = [
+       Sig("-a"),
+       Sig("-b", "--boo", type=int, dest='boo'),
+       Sig("--foo", action="append"),
+       Sig("pos", nargs='*', default=argparse.SUPPRESS)
+    ]
+    failures = [
+        # test_short_option_consumes_separator
+        # even with default_to_positionals, '--' is still a separator
+        # (["-a", "--", "foo", "bar"],
+        #   NS(**{'a': "--", 'boo': None, 'foo': None, 'pos': ["foo", "bar"]})),
+        '-a -- foo bar',
+        # (["-a", "--", "--foo", "bar"],
+        #   NS(**{'a': "--", 'boo': None, 'foo': ["bar"]})),
+        '-a -- --foo bar',
+        # test_option_consumes_optionlike_string
+        # even with default_to_positionals, -b is not an argument
+        # (["-a", "-b3"], NS(**{'a': "-b3", 'boo': None, 'foo': None})),
+        '-a -b3'
+    ]
+    successes = [
+        # test_short_option_split_one_positional_arg
+        (["-a", "foo", "bar"],
+            NS(**{'a': "foo", 'boo': None, 'foo': None, 'pos': ["bar"]})),
+        # test_short_option_joined_and_separator
+        (["-ab", "--", "--foo", "bar"],
+            NS(**{'a': "b", 'boo': None, 'foo': None, 'pos': ["--foo", "bar"]})),
+        # test_hyphen_becomes_positional_arg
+        (["-ab", "-", "--foo", "bar"],
+            NS(**{'a': "b", 'boo': None, 'foo': ["bar"], 'pos': ["-"]})),
+        # test_no_append_versus_append
+        (["-b3", "-b", "5", "--foo=bar", "--foo", "baz"],
+            NS(**{'a': None, 'boo': 5, 'foo': ["bar", "baz"]})),
+    ]
 
 class TestDefaultSuppress(ParserTestCase):
     """Test actions with suppressed defaults"""

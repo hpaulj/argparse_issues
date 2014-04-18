@@ -169,6 +169,9 @@ ArgumentParser objects
 
    * add_help_ - Add a -h/--help option to the parser (default: ``True``)
 
+   * args_default_to_positional_ - Parse unrecognized arguments as
+     positionals, as opposed to optionals (default: False).
+
 The following sections describe how each of these are used.
 
 
@@ -602,6 +605,36 @@ the help options::
 
    optional arguments:
      -h, --help  show this help message and exit
+
+args_default_to_positional
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:class:`ArgumentParser` parses the argument strings, classifying them as
+optionals or positionals (arguments). By default, a string starting with one of the
+``prefix_chars`` is assumed to be a command-line option.  If ``args_default_to_positional=True``,
+such a string will be parsed as an argument, unless it matches one of the defined
+command-line options::
+
+   >>> parser = argparse.ArgumentParser(args_default_to_positional=True)
+   >>> parser.add_argument('--foo')
+   >>> parser.add_argument('--bar', nargs=2)
+   >>> parser.parse_args('--foo --baz --bar -one -two'.split())
+   Namespace(bar=['-one', '-two'], foo='--baz')
+
+This approximates the behavior of :mod:`optparse`, which freely accepts
+arguments that begin with ``'-'``.  Note however that in this example ``--foo --bar``
+gives an error, since ``--bar`` is defined as a command-line option::
+
+   >>> parser.parse_args('--foo --bar'.split())
+   usage: [-h] [--foo FOO] [--bar BAR BAR]
+   : error: argument --foo: expected one argument
+
+Joining the option and value with `=` gets around this limitation::
+
+   >>> parser.parse_args('--foo=--bar'.split())
+   Namespace(bar=None, foo='--bar')
+
+See also `Arguments containing -`_.
 
 
 The add_argument() method
@@ -1321,6 +1354,7 @@ it exits and prints the error along with a usage message::
    usage: PROG [-h] [--foo FOO] [bar]
    PROG: error: extra arguments found: badger
 
+.. _`Arguments containing -`:
 
 Arguments containing ``-``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1345,6 +1379,10 @@ there are no options in the parser that look like negative numbers::
    >>> parser.parse_args(['-x', '-1', '-5'])
    Namespace(foo='-5', x='-1')
 
+   >>> # complex and scientific notation are accepted as well
+   >>> parser.parse_args(['-x', '-1e-3', '-1-4j'])
+   Namespace(foo='-1-4j', x='-1e-3')
+
    >>> parser = argparse.ArgumentParser(prog='PROG')
    >>> parser.add_argument('-1', dest='one')
    >>> parser.add_argument('foo', nargs='?')
@@ -1353,15 +1391,19 @@ there are no options in the parser that look like negative numbers::
    >>> parser.parse_args(['-1', 'X'])
    Namespace(foo=None, one='X')
 
-   >>> # negative number options present, so -2 is an option
+   >>> # negative number options present, so -2 is an unrecognized option
    >>> parser.parse_args(['-2'])
    usage: PROG [-h] [-1 ONE] [foo]
-   PROG: error: no such option: -2
+   PROG: error: unrecognized arguments: -2
 
    >>> # negative number options present, so both -1s are options
    >>> parser.parse_args(['-1', '-1'])
    usage: PROG [-h] [-1 ONE] [foo]
    PROG: error: argument -1: expected one argument
+
+   >>> # negative number options present, '-1...' is -1 option plus argument
+   >>> parser.test(['-1.3e4'])
+   Namespace(foo=None, one='.3e4')
 
 If you have positional arguments that must begin with ``-`` and don't look
 like negative numbers, you can insert the pseudo-argument ``'--'`` which tells
@@ -1370,6 +1412,23 @@ argument::
 
    >>> parser.parse_args(['--', '-f'])
    Namespace(foo='-f', one=None)
+
+:class:`ArgumentParser` optional argument, args_default_to_positional_
+alters this behavior, allowing a positional argument to begin with ``-``,
+provided it does not match a defined option.  Use this alternative with caution
+if positional arguments could be confused with command options::
+
+   >>> parser = argparse.ArgumentParser(args_default_to_positional=True)
+   >>> parser.add_argument('-1', dest='one')
+   >>> parser.add_argument('foo', nargs='?')
+
+   >>> # default_to_positional, '-2-4j' is now recognized as an argument
+   >>> parser.parse_args(['-1', '-2-4j', '-3-4j'])
+   Namespace(foo='-3-4j', one='-2-4j')
+
+   >>> # default_to_positional, '-1.3e4' still matches the -1 option
+   >>> parser.parse_args(['-1.3e4'])
+   Namespace(foo=None, one='.3e4')
 
 
 Argument abbreviations
