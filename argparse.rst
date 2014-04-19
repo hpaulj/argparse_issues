@@ -913,6 +913,21 @@ values are:
      >>> print(parser.parse_args('--foo B cmd --arg1 XX ZZ'.split()))
      Namespace(args=['--arg1', 'XX', 'ZZ'], command='cmd', foo='B')
 
+
+* ``'{m,n}'``.  `m` to `n` command-line arguments are gathered into a list.
+  This is modeled on the Regular Expression use. ``'{,n}'`` gathers up to
+  `n` arguments.  ``'{m,}'`` gathers `m` or more.  Thus ``'{1,}'`` is the
+  equivalent to ``'+'``, and ``'{,1}'`` to ``'?'``.  A tuple notation is
+  also accepted, ``'(m,n)'``, ``'(None,n)'``, ``'(m,None)'``.  For example::
+
+     >>> parser = argparse.ArgumentParser(prog='PROG')
+     >>> parser.add_argument('--foo', nargs='{2,4}')
+     >>> parser.parse_args('--foo a b c'.split())
+     Namespace(foo=['a', 'b', 'c'])
+     >>> parser.parse_args('--foo a'.split())
+     usage: PROG [-h] [--foo FOO{2,4}]
+     PROG: error: argument --foo: expected {2,4} arguments
+
 If the ``nargs`` keyword argument is not provided, the number of arguments consumed
 is determined by the action_.  Generally this means a single command-line argument
 will be consumed and a single item (not a list) will be produced.

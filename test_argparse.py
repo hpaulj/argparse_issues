@@ -1249,6 +1249,7 @@ class TestPrefixCharacterOnlyArguments(ParserTestCase):
 
 class TestNargsZeroOrMore(ParserTestCase):
     """Tests specifying an args for an Optional that accepts zero or more"""
+    """Strings that work without the issue9338 patch """
 
     argument_signatures = [Sig('-x', nargs='*'), Sig('y', nargs='*')]
     failures = []
@@ -1260,6 +1261,210 @@ class TestNargsZeroOrMore(ParserTestCase):
         ('a', NS(x=None, y=['a'])),
         ('a -x', NS(x=[], y=['a'])),
         ('a -x b', NS(x=['b'], y=['a'])),
+    ]
+
+
+class TestPositionalAfterOptionalOneOrMore(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=+"""
+    """http://bugs.python.org/file18328/test_pos_after_var_args.patch"""
+
+    argument_signatures = [Sig('-x', nargs='+'), Sig('y')]
+    failures = ['', '-x']
+    successes = [
+        ('-x foo bar', NS(x=['foo',], y='bar')),
+        ('-x foo bar baz', NS(x=['foo', 'bar'], y='baz')),
+        ('-x foo bar baz buzz', NS(x=['foo', 'bar', 'baz'], y='buzz')),
+    ]
+
+
+class TestPositionalsAfterOptionalsPlus(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=+
+    http://bugs.python.org/issue9338#msg111270
+    prototypical problem"""
+
+    argument_signatures = [
+        Sig('-w'),
+        Sig('-x', nargs='+'),
+        Sig('y', type=int),
+        Sig('z', nargs='*', type=int)]
+    failures = ['1 -x 2 3 -w 4 5 6' # error: unrecognized arguments: 5 6
+                # z consumed in 1st argument group '1'
+    ]
+    successes = [
+        # prototypical case for this issue
+        ('-w 1 -x 2 3 4 5', NS(w='1', x=['2', '3', '4'], y=5, z=[])),
+        ('-w 1 -x 2 3', NS(w='1', x=['2'], y=3, z=[])),
+        ('-w 1 -x 2 3 -w 4', NS(w='4', x=['2'], y=3, z=[])  ),
+        ('-x 1 2 -w 3', NS(w='3', x=['1'], y=2, z=[])),
+        ('-x 1 2 3 4 -w 5', NS(w='5', x=['1', '2', '3'], y=4, z=[])),
+        # strings that worked before
+        ('-w 1 -x2 3 4 5', NS(w='1', x=['2'], y=3, z=[4, 5])),
+        ('-w 1 2 -x 3 4 5', NS(w='1', x=['3', '4', '5'], y=2, z=[])),
+        ('-w 1 -x2 3', NS(w='1', x=['2'], y=3, z=[])),
+        ('-x 1 2 -w 3 4 5 6',NS(w='3', x=['1', '2'], y=4, z=[5, 6]) ),
+        ('-x 1 2 3 4 -w 5 6 7', NS(w='5', x=['1', '2', '3', '4'], y=6, z=[7])),
+        ('1 2 3 -x 4 5 -w 6', NS(w='6', x=['4', '5'], y=1, z=[2, 3])),
+        ('1 2 3', NS(w=None, x=None, y=1, z=[2, 3])),
+        ('1 -x 2 3 -w 4', NS(w='4', x=['2', '3'], y=1, z=[])),
+    ]
+
+
+class TestPositionalArgAfterOptionalOptional(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=?"""
+
+    argument_signatures = [
+        Sig('-x', nargs='?'),
+        Sig('y',type=int)]
+    failures = []
+    successes = [
+        ('-x 1', NS(x=None, y=1)),
+        ('-x 1 2', NS(x='1', y=2))
+    ]
+
+
+class TestPositionalArgAfterNargsOptionalZeroOrMore(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=*"""
+
+    argument_signatures = [
+        Sig('-x', nargs='*'),
+        Sig('y',type=int)]
+    failures = []
+    successes = [
+        ('-x 1', NS(x=[], y=1)),
+        ('-x 1 2', NS(x=['1'], y=2)),
+        ('-x 1 2 3',NS(x=['1', '2'], y=3))
+    ]
+
+
+class TestPositional2AfterOptionalZeroOrMore(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=*"""
+
+    argument_signatures = [
+        Sig('-x', nargs='*'),
+        Sig('y', type=int, nargs=2)]
+    failures = ['-x 1']
+    successes = [
+        ('-x 1 2', NS(x=[], y=[1,2])),
+        ('-x 1 2 3',NS(x=['1'], y=[2,3]))
+    ]
+
+
+class Test2PositionalsAfterOptionalsPlus(ParserTestCase):
+    """Tests specifying 2 positionals after optional with nargs=+"""
+
+    argument_signatures = [
+        Sig('-x', nargs='+'),
+        Sig('y', type=int, nargs=2),
+        Sig('z', type=int, nargs='+')]
+    failures = ['-x 1', '-x 1 2', '-x 1 2 3']
+    successes = [
+        ('-x 1 2 3 4', NS(x=['1'], y=[2,3], z=[4])),
+        ('-x 1 2 3 4 5', NS(x=['1','2'], y=[3,4], z=[5]))
+    ]
+
+
+class Test2PositionalsAfterOptionalPlus(ParserTestCase):
+    """Tests specifying 2 positionals that follow an arg with nargs=+"""
+
+    argument_signatures = [
+        Sig('-w', nargs='+'),
+        Sig('-x', nargs='+'),
+        Sig('y',type=int,nargs=2),
+        Sig('z',type=int,nargs='+')]
+    failures = ['-x 1', '-x 1 2', '-x 1 2 3','-w 1 -x 2 3 4']
+    successes = [
+        ('-x 1 2 3 4', NS(w=None, x=['1'], y=[2, 3], z=[4])),
+        ('-x 1 2 3 4 5', NS(w=None, x=['1', '2'], y=[3, 4], z=[5])),
+        ('-w 1 -x 2 3 4 5', NS(w=['1'], x=['2'], y=[3, 4], z=[5])),
+        ('-w 1 2 -x 3 4 5 6',NS(w=['1', '2'], x=['3'], y=[4, 5], z=[6])),
+        ('-w 1 2 3 -x 4 5 6', NS(w=['1'], x=['4', '5'], y=[2, 3], z=[6]))
+    ]
+
+
+class TestPositionalsAfterOptionalsComplex(ParserTestCase):
+    """Tests specifying positionals after optionals; complex case"""
+    """Something of a stress test"""
+
+    argument_signatures = [
+        Sig('-a', nargs='?'),
+        Sig('-b', nargs='+'),
+        Sig('-c', nargs='*'),
+        Sig('-j', action='store_true'),
+        Sig('-l'),
+        Sig('-m', nargs=1),
+        Sig('x', type=int),
+        Sig('y', type=int, nargs=2),
+        Sig('z', type=int, nargs='+')]
+    failures = []
+    successes = [('1 2 3 4 5', NS(a=None, b=None, c=None, j=False, l=None, m=None, x=1, y=[2, 3], z=[4, 5])),
+        ('-a 1 2 3 4 5', NS(a='1', b=None, c=None, j=False, l=None, m=None, x=2, y=[3, 4], z=[5])),
+        ('-a 1 -b 2 3 4 5 6', NS(a='1', b=['2'], c=None, j=False, l=None, m=None, x=3, y=[4, 5], z=[6])),
+        ('-a 1 -b 2 3 -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=False, l=None, m=None, x=5, y=[6, 7], z=[8])),
+        ('-a 1 -b 2 3 -j -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=True, l=None, m=None, x=5, y=[6, 7], z=[8])),
+        ('-a 1 -l L -b 2 3 -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=False, l='L', m=None, x=5, y=[6, 7], z=[8])),
+        ('-a 1 -l L -b 2 3 -m M -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=False, l='L', m=['M'], x=5, y=[6, 7], z=[8])),
+        ('-a 1 -l L -c 2 3 -m M -b 4 5 6 7 8', NS(a='1', b=['4'], c=['2', '3'], j=False, l='L', m=['M'], x=5, y=[6, 7], z=[8])),
+        ('-l L -a 1 -j -b 2 3 -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=True, l='L', m=None, x=5, y=[6, 7], z=[8])),
+        ('-l L -a 1 -j -b 2 3 4 -m M -c 5', NS(a=None, b=['2'], c=[], j=True, l='L', m=['M'], x=1, y=[3, 4], z=[5])),
+        ('-l L -a 1 -j -b 2 3 4 -m M -c 5 6 7', NS(a='1', b=['2', '3'], c=[], j=True, l='L', m=['M'], x=4, y=[5, 6], z=[7]))
+    ]
+
+class TestPositionalAfterOptionalRange(ParserTestCase):
+    """Tests specifying positional that follow an arg with nargs={}"""
+
+    argument_signatures = [
+        Sig('-x', nargs='{2,4}'),
+        Sig('y',type=int)
+    ]
+    failures = ['-x 1', '-x 1 2']
+    successes = [
+        ('-x 1 2 3', NS(x=['1','2'], y=3)),
+        ('-x 1 2 3 4', NS(x=['1','2','3'], y=4)),
+        ('-x 1 2 3 -- 4', NS(x=['1','2','3'], y=4)),
+        ('4 -x 1 2 3', NS(x=['1','2','3'], y=4)),
+    ]
+
+
+class TestPositionalAfterOptionalHalfRange1(ParserTestCase):
+    """Tests specifying positional that follow an arg with nargs={2,}"""
+
+    argument_signatures = [
+        Sig('-x', nargs='{2,}'),
+        Sig('y', type=int)
+    ]
+    failures = ['-x 1', '-x 1 2'] # # error expected 2 args; # error  following missing y
+    successes = [
+        ('-x 1 2 3', NS(x=['1','2'], y=3)),
+        ('-x 1 2 3 4', NS(x=['1','2','3'], y=4)),
+    ]
+
+
+class TestPositionalAfterOptionalHalfRange2(ParserTestCase):
+    """Tests specifying positional that follow an arg with nargs={,2}"""
+
+    argument_signatures = [
+        Sig('-x', nargs='{,2}'),
+        Sig('y', type=int)
+    ]
+    failures = ['-x 1 2 3 4']
+    successes = [
+        ('-x 1', NS(x=[], y=1)),
+        ('-x 1 2', NS(x=['1'], y=2)),
+        ('-x 1 2 3', NS(x=['1','2'], y=3)),
+    ]
+
+
+class TestPositionalRangeAfterOptionalRange(ParserTestCase):
+    """Tests specifying positional with {} that follow an arg with nargs={}"""
+
+    argument_signatures = [
+        Sig('-x', nargs='{1,3}'),
+        Sig('y', type=int, nargs='{2,}')
+    ]
+    failures = ['-x 1', '-x 1 2']
+    successes = [
+        ('-x 1 2 3', NS(x=['1'], y=[2, 3])),
+        ('-x 1 2 3 4 5 6', NS(x=['1', '2', '3'], y=[4, 5, 6])),
     ]
 
 
@@ -4470,6 +4675,40 @@ class TestInvalidArgumentConstructors(TestCase):
         self.assertRaises(Success, parser.add_argument, 'spam',
                           action=Action, default=Success, const=Success)
 
+    def test_nargs_value(self):
+        """test for invalid values of nargs, not integer or accepted string
+        tests parser and groups"""
+        error_msg = r"nargs (.*) not integer or"
+        error_msg = r"argument --foo: nargs (.*) not integer or \[(.*)\]"
+        error_type = argparse.ArgumentError
+        parser = ErrorRaisingArgumentParser()
+        group = parser.add_argument_group('g')
+        m = parser.add_mutually_exclusive_group()
+
+        with self.assertRaisesRegex(error_type, error_msg):
+            parser.add_argument('--foo', nargs='1')
+        with self.assertRaisesRegex(error_type, error_msg):
+            group.add_argument('--foo', nargs='**')
+        with self.assertRaisesRegex(error_type, error_msg):
+            m.add_argument('--foo', nargs='1')
+
+    def test_nargs_metavar_tuple(self):
+        "test that metavar tuple matches with nargs; test parser and groups"
+        error_msg = r'length of metavar tuple does not match nargs'
+        error_type = ValueError
+        error_msg = r'argument (.*): length of metavar tuple does not match nargs'
+        error_type = argparse.ArgumentError
+        parser = ErrorRaisingArgumentParser()
+        group = parser.add_argument_group('g')
+        m = parser.add_mutually_exclusive_group()
+
+        with self.assertRaisesRegex(error_type, error_msg):
+            parser.add_argument('-w', help='w', nargs='+', metavar=('W1',))
+        with self.assertRaisesRegex(error_type, error_msg):
+            group.add_argument('-x', help='x', nargs='*', metavar=('X1', 'X2', 'x3'))
+        with self.assertRaisesRegex(error_type, error_msg):
+            m.add_argument('-y', help='y', nargs=3, metavar=('Y1', 'Y2'))
+
 # ================================
 # Actions returned by add_argument
 # ================================
@@ -4939,19 +5178,23 @@ class TestParseKnownArgs(TestCase):
 
 class TestAddArgumentMetavar(TestCase):
 
-    EXPECTED_MESSAGE = "length of metavar tuple does not match nargs"
+    EXPECTED_MESSAGE = "argument --foo: length of metavar tuple does not match nargs"
+    EXPECTED_ERROR = argparse.ArgumentError
 
     def do_test_no_exception(self, nargs, metavar):
         parser = argparse.ArgumentParser()
         parser.add_argument("--foo", nargs=nargs, metavar=metavar)
 
+    #def do_test_exception(self, nargs, metavar):
+    #    parser = argparse.ArgumentParser()
+    #    with self.assertRaises(ValueError) as cm:
+    #        parser.add_argument("--foo", nargs=nargs, metavar=metavar)
+    #    self.assertEqual(cm.exception.args[0], self.EXPECTED_MESSAGE)
+
     def do_test_exception(self, nargs, metavar):
         parser = argparse.ArgumentParser()
-        with self.assertRaises(ValueError) as cm:
+        with self.assertRaisesRegex(self.EXPECTED_ERROR, self.EXPECTED_MESSAGE):
             parser.add_argument("--foo", nargs=nargs, metavar=metavar)
-        self.assertEqual(cm.exception.args[0], self.EXPECTED_MESSAGE)
-
-    # Unit tests for different values of metavar when nargs=None
 
     def test_nargs_None_metavar_string(self):
         self.do_test_no_exception(nargs=None, metavar="1")
@@ -5103,6 +5346,117 @@ class TestAddArgumentMetavar(TestCase):
 
     def test_nargs_3_metavar_length3(self):
         self.do_test_no_exception(nargs=3, metavar=("1", "2", "3"))
+
+# ============================
+# test when nargs is range
+# ============================
+
+class TestNargsRangeAddArgument(TestCase):
+    """Test processing nargs when range ((m,n) or {m,n}) is set"""
+    def test1(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=() )
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=(1,) )
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=('xxx', None))
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=(None, 'xxx'))
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=(8, 3))
+
+    def test_add_argument5(self):
+        "nargs = (lo, hi), where lo < hi"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        arg = parser.add_argument('-a', nargs=(3,5))
+        self.assertEqual(arg.nargs, '{3,5}')
+
+
+    def test_add_argument11(self):
+        "nargs = (None, number) => (0, number)"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        arg = parser.add_argument('-a', nargs=(None, 87))
+        self.assertEqual(arg.nargs, '{,87}')
+
+class TestNargumentRangeArgumentParsing(ParserTestCase):
+    "Test parsing arguments when nargs sets range of options count"
+
+    argument_signatures = [Sig('positional', nargs='*'),
+        Sig('-o','--optional'),
+        Sig('--foo', nargs=(3,7))]
+    failures = ["--foo aa bb -o cc dd ee ff gg hh",
+    "--foo -o aa bb cc dd ee ff gg hh"]
+    successes = [
+        ('--foo aa bb cc dd ee ff gg hh',
+        NS(foo='aa bb cc dd ee ff gg'.split(), optional=None, positional=['hh'])),
+        ('--foo aa bb cc dd -o ee ff gg hh',
+        NS(foo='aa bb cc dd'.split(),
+           positional='ff gg hh'.split(),
+           optional='ee')),
+    ]
+
+class TestNargumentRangeArgumentParsing5(ParserTestCase):
+    "Test parsing arguments when nargs sets range of options count"
+
+    argument_signatures = [Sig('positional', nargs='*'),
+        Sig('-o','--optional'),
+        Sig('--foo', nargs=(3,None))]
+    failures = ["--foo aa bb -o cc dd ee ff gg hh ii -o jj kk"]
+    successes = [
+        ('--foo aa bb cc dd ee ff gg hh ii -o jj kk',
+        NS(foo='aa bb cc dd ee ff gg hh ii'.split(), optional='jj', positional=['kk'])),
+    ]
+
+class TestNargsRange1(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{2,4}', type=int),
+        Sig('rest', nargs='*')]
+    failures = ['1']
+    successes = [
+        ('1 2', NS(pos=[1,2], rest=[])),
+        ('1 2 3', NS(pos=[1,2,3], rest=[])),
+        ('1 2 3 4', NS(pos=[1,2,3,4], rest=[])),
+        ('1 2 3 4 bar', NS(pos=[1,2,3,4], rest=['bar'])),
+        ]
+
+class TestNargsRange2(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{2,4}', type=int),
+        Sig('rest')]
+    failures = ['1', '1 2', ]
+    successes = [
+        ('1 2 bar', NS(pos=[1,2], rest='bar')),
+        ('1 2 3', NS(pos=[1,2], rest='3')),
+        ('1 2 3 4', NS(pos=[1,2,3], rest='4')),
+        ('1 2 3 4 bar', NS(pos=[1,2,3,4], rest='bar')),
+        ]
+    # # "usage: [-h] 'pos',{2,4}\n\npositional arguments:\n  pos\n\noptional arguments:\n  -h, --help  show this help message and exit\n"
+
+class TestNargsRange3(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{2,}', type=int)]
+    failures = ['', '1']
+    successes = [
+        ('1 2', NS(pos=[1,2])),
+        ('1 2 3 4 5 6', NS(pos=[1,2,3,4,5,6])),
+        ]
+
+class TestNargsRange4(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{,2}', type=int)]
+    failures = ['1 2 3']
+    successes = [
+        ('', NS(pos=[])),
+        ('1', NS(pos=[1])),
+        ('1 2', NS(pos=[1,2])),
+        ]
+
+class TestNargsRange5(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{2,2}', type=int)]
+    failures = ['','1','1 2 3']
+    successes = [
+        ('1 2', NS(pos=[1,2])),
+        ]
+
+
+
 
 # ============================
 # from argparse import * tests
