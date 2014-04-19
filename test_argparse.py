@@ -1228,6 +1228,7 @@ class TestPrefixCharacterOnlyArguments(ParserTestCase):
 
 class TestNargsZeroOrMore(ParserTestCase):
     """Tests specifying an args for an Optional that accepts zero or more"""
+    """Strings that work without the issue9338 patch """
 
     argument_signatures = [Sig('-x', nargs='*'), Sig('y', nargs='*')]
     failures = []
@@ -1239,6 +1240,155 @@ class TestNargsZeroOrMore(ParserTestCase):
         ('a', NS(x=None, y=['a'])),
         ('a -x', NS(x=[], y=['a'])),
         ('a -x b', NS(x=['b'], y=['a'])),
+    ]
+
+
+class TestPositionalAfterOptionalOneOrMore(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=+"""
+    """http://bugs.python.org/file18328/test_pos_after_var_args.patch"""
+
+    argument_signatures = [Sig('-x', nargs='+'), Sig('y')]
+    failures = ['', '-x']
+    successes = [
+        ('-x foo bar', NS(x=['foo',], y='bar')),
+        ('-x foo bar baz', NS(x=['foo', 'bar'], y='baz')),
+        ('-x foo bar baz buzz', NS(x=['foo', 'bar', 'baz'], y='buzz')),
+    ]
+
+
+class TestPositionalsAfterOptionalsPlus(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=+
+    http://bugs.python.org/issue9338#msg111270
+    prototypical problem"""
+
+    argument_signatures = [
+        Sig('-w'),
+        Sig('-x', nargs='+'),
+        Sig('y', type=int),
+        Sig('z', nargs='*', type=int)]
+    failures = ['1 -x 2 3 -w 4 5 6' # error: unrecognized arguments: 5 6
+                # z consumed in 1st argument group '1'
+    ]
+    successes = [
+        # prototypical case for this issue
+        ('-w 1 -x 2 3 4 5', NS(w='1', x=['2', '3', '4'], y=5, z=[])),
+        ('-w 1 -x 2 3', NS(w='1', x=['2'], y=3, z=[])),
+        ('-w 1 -x 2 3 -w 4', NS(w='4', x=['2'], y=3, z=[])  ),
+        ('-x 1 2 -w 3', NS(w='3', x=['1'], y=2, z=[])),
+        ('-x 1 2 3 4 -w 5', NS(w='5', x=['1', '2', '3'], y=4, z=[])),
+        # strings that worked before
+        ('-w 1 -x2 3 4 5', NS(w='1', x=['2'], y=3, z=[4, 5])),
+        ('-w 1 2 -x 3 4 5', NS(w='1', x=['3', '4', '5'], y=2, z=[])),
+        ('-w 1 -x2 3', NS(w='1', x=['2'], y=3, z=[])),
+        ('-x 1 2 -w 3 4 5 6', NS(w='3', x=['1', '2'], y=4, z=[5, 6]) ),
+        ('-x 1 2 3 4 -w 5 6 7', NS(w='5', x=['1', '2', '3', '4'], y=6, z=[7])),
+        ('1 2 3 -x 4 5 -w 6', NS(w='6', x=['4', '5'], y=1, z=[2, 3])),
+        ('1 2 3', NS(w=None, x=None, y=1, z=[2, 3])),
+        ('1 -x 2 3 -w 4', NS(w='4', x=['2', '3'], y=1, z=[])),
+    ]
+
+
+class TestPositionalArgAfterOptionalOptional(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=?"""
+
+    argument_signatures = [
+        Sig('-x', nargs='?'),
+        Sig('y', type=int)]
+    failures = []
+    successes = [
+        ('-x 1', NS(x=None, y=1)),
+        ('-x 1 2', NS(x='1', y=2))
+    ]
+
+
+class TestPositionalArgAfterNargsOptionalZeroOrMore(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=*"""
+
+    argument_signatures = [
+        Sig('-x', nargs='*'),
+        Sig('y', type=int)]
+    failures = []
+    successes = [
+        ('-x 1', NS(x=[], y=1)),
+        ('-x 1 2', NS(x=['1'], y=2)),
+        ('-x 1 2 3',NS(x=['1', '2'], y=3))
+    ]
+
+
+class TestPositional2AfterOptionalZeroOrMore(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=*"""
+
+    argument_signatures = [
+        Sig('-x', nargs='*'),
+        Sig('y', type=int, nargs=2)]
+    failures = ['-x 1']
+    successes = [
+        ('-x 1 2', NS(x=[], y=[1,2])),
+        ('-x 1 2 3', NS(x=['1'], y=[2,3]))
+    ]
+
+
+class Test2PositionalsAfterOptionalsPlus(ParserTestCase):
+    """Tests specifying 2 positionals after optional with nargs=+"""
+
+    argument_signatures = [
+        Sig('-x', nargs='+'),
+        Sig('y', type=int, nargs=2),
+        Sig('z', type=int, nargs='+')]
+    failures = ['-x 1', '-x 1 2', '-x 1 2 3']
+    successes = [
+        ('-x 1 2 3 4', NS(x=['1'], y=[2,3], z=[4])),
+        ('-x 1 2 3 4 5', NS(x=['1','2'], y=[3,4], z=[5]))
+    ]
+
+
+class Test2PositionalsAfterOptionalPlus(ParserTestCase):
+    """Tests specifying 2 positionals that follow an arg with nargs=+"""
+
+    argument_signatures = [
+        Sig('-w', nargs='+'),
+        Sig('-x', nargs='+'),
+        Sig('y', type=int,nargs=2),
+        Sig('z', type=int,nargs='+')]
+    failures = ['-x 1', '-x 1 2', '-x 1 2 3','-w 1 -x 2 3 4']
+    successes = [
+        ('-x 1 2 3 4', NS(w=None, x=['1'], y=[2, 3], z=[4])),
+        ('-x 1 2 3 4 5', NS(w=None, x=['1', '2'], y=[3, 4], z=[5])),
+        ('-w 1 -x 2 3 4 5', NS(w=['1'], x=['2'], y=[3, 4], z=[5])),
+        ('-w 1 2 -x 3 4 5 6', NS(w=['1', '2'], x=['3'], y=[4, 5], z=[6])),
+        ('-w 1 2 3 -x 4 5 6', NS(w=['1'], x=['4', '5'], y=[2, 3], z=[6]))
+    ]
+
+
+class TestPositionalsAfterOptionalsComplex(ParserTestCase):
+    """Tests specifying positionals after optionals; complex case"""
+    """Something of a stress test"""
+
+    argument_signatures = [
+        Sig('-a', nargs='?'),
+        Sig('-b', nargs='+'),
+        Sig('-c', nargs='*'),
+        Sig('-j', action='store_true'),
+        Sig('-l'),
+        Sig('-m', nargs=1),
+        Sig('x', type=int),
+        Sig('y', type=int, nargs=2),
+        Sig('z', type=int, nargs='+')]
+    failures = []
+    successes = [('1 2 3 4 5', NS(a=None, b=None, c=None, j=False, l=None, m=None, x=1, y=[2, 3], z=[4, 5])),
+        ('-a 1 2 3 4 5', NS(a='1', b=None, c=None, j=False, l=None, m=None, x=2, y=[3, 4], z=[5])),
+        ('-a 1 -b 2 3 4 5 6', NS(a='1', b=['2'], c=None, j=False, l=None, m=None, x=3, y=[4, 5], z=[6])),
+        ('-a 1 -b 2 3 -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=False, l=None, m=None, x=5, y=[6, 7], z=[8])),
+        ('-a 1 -b 2 3 -j -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=True, l=None, m=None, x=5, y=[6, 7], z=[8])),
+        ('-a 1 -l L -b 2 3 -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=False, l='L', m=None, x=5, y=[6, 7], z=[8])),
+        ('-a 1 -l L -b 2 3 -m M -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=False, l='L', m=['M'], x=5, y=[6, 7], z=[8])),
+        ('-a 1 -l L -c 2 3 -m M -b 4 5 6 7 8', NS(a='1', b=['4'], c=['2', '3'], j=False, l='L', m=['M'], x=5, y=[6, 7], z=[8])),
+        ('-l L -a 1 -j -b 2 3 -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=True, l='L', m=None, x=5, y=[6, 7], z=[8])),
+        ('-l L -a 1 -j -b 2 3 4 -m M -c 5', NS(a=None, b=['2'], c=[], j=True, l='L', m=['M'], x=1, y=[3, 4], z=[5])),
+        ('-l L -a 1 -j -b 2 3 4 -m M -c 5 6 7', NS(a='1', b=['2', '3'], c=[], j=True, l='L', m=['M'], x=4, y=[5, 6], z=[7])),
+        ('-lL -a1 -j -b 2 3 -c4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=True, l='L', m=None, x=5, y=[6, 7], z=[8])),
+        ('-lL -a 1 -jb2 3 -c4 5 6 7', NS(a='1', b=['2'], c=['4'], j=True, l='L', m=None, x=3, y=[5, 6], z=[7])),
+        ('-lL -a 1 -jb 2 3 4 -c 5 6', NS(a=None, b=['2'], c=['5'], j=True, l='L', m=None, x=1, y=[3, 4], z=[6])),
     ]
 
 
