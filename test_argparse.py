@@ -4251,6 +4251,40 @@ class TestInvalidArgumentConstructors(TestCase):
         self.assertRaises(Success, parser.add_argument, 'spam',
                           action=Action, default=Success, const=Success)
 
+    def test_nargs_value(self):
+        """test for invalid values of nargs, not integer or accepted string
+        tests parser and groups"""
+        error_msg = r"nargs (.*) not integer or"
+        error_msg = r"argument --foo: nargs (.*) not integer or \[(.*)\]"
+        error_type = argparse.ArgumentError
+        parser = ErrorRaisingArgumentParser()
+        group = parser.add_argument_group('g')
+        m = parser.add_mutually_exclusive_group()
+
+        with self.assertRaisesRegex(error_type, error_msg):
+            parser.add_argument('--foo', nargs='1')
+        with self.assertRaisesRegex(error_type, error_msg):
+            group.add_argument('--foo', nargs='**')
+        with self.assertRaisesRegex(error_type, error_msg):
+            m.add_argument('--foo', nargs='1')
+
+    def test_nargs_metavar_tuple(self):
+        "test that metavar tuple matches with nargs; test parser and groups"
+        error_msg = r'length of metavar tuple does not match nargs'
+        error_type = ValueError
+        error_msg = r'argument (.*): length of metavar tuple does not match nargs'
+        error_type = argparse.ArgumentError
+        parser = ErrorRaisingArgumentParser()
+        group = parser.add_argument_group('g')
+        m = parser.add_mutually_exclusive_group()
+
+        with self.assertRaisesRegex(error_type, error_msg):
+            parser.add_argument('-w', help='w', nargs='+', metavar=('W1',))
+        with self.assertRaisesRegex(error_type, error_msg):
+            group.add_argument('-x', help='x', nargs='*', metavar=('X1', 'X2', 'x3'))
+        with self.assertRaisesRegex(error_type, error_msg):
+            m.add_argument('-y', help='y', nargs=3, metavar=('Y1', 'Y2'))
+
 # ================================
 # Actions returned by add_argument
 # ================================
@@ -4720,19 +4754,23 @@ class TestParseKnownArgs(TestCase):
 
 class TestAddArgumentMetavar(TestCase):
 
-    EXPECTED_MESSAGE = "length of metavar tuple does not match nargs"
+    EXPECTED_MESSAGE = "argument --foo: length of metavar tuple does not match nargs"
+    EXPECTED_ERROR = argparse.ArgumentError
 
     def do_test_no_exception(self, nargs, metavar):
         parser = argparse.ArgumentParser()
         parser.add_argument("--foo", nargs=nargs, metavar=metavar)
 
+    #def do_test_exception(self, nargs, metavar):
+    #    parser = argparse.ArgumentParser()
+    #    with self.assertRaises(ValueError) as cm:
+    #        parser.add_argument("--foo", nargs=nargs, metavar=metavar)
+    #    self.assertEqual(cm.exception.args[0], self.EXPECTED_MESSAGE)
+
     def do_test_exception(self, nargs, metavar):
         parser = argparse.ArgumentParser()
-        with self.assertRaises(ValueError) as cm:
+        with self.assertRaisesRegex(self.EXPECTED_ERROR, self.EXPECTED_MESSAGE):
             parser.add_argument("--foo", nargs=nargs, metavar=metavar)
-        self.assertEqual(cm.exception.args[0], self.EXPECTED_MESSAGE)
-
-    # Unit tests for different values of metavar when nargs=None
 
     def test_nargs_None_metavar_string(self):
         self.do_test_no_exception(nargs=None, metavar="1")
@@ -4884,6 +4922,117 @@ class TestAddArgumentMetavar(TestCase):
 
     def test_nargs_3_metavar_length3(self):
         self.do_test_no_exception(nargs=3, metavar=("1", "2", "3"))
+
+# ============================
+# test when nargs is range
+# ============================
+
+class TestNargsRangeAddArgument(TestCase):
+    """Test processing nargs when range ((m,n) or {m,n}) is set"""
+    def test1(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=() )
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=(1,) )
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=('xxx', None))
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=(None, 'xxx'))
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=(8, 3))
+
+    def test_add_argument5(self):
+        "nargs = (lo, hi), where lo < hi"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        arg = parser.add_argument('-a', nargs=(3,5))
+        self.assertEqual(arg.nargs, '{3,5}')
+
+
+    def test_add_argument11(self):
+        "nargs = (None, number) => (0, number)"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        arg = parser.add_argument('-a', nargs=(None, 87))
+        self.assertEqual(arg.nargs, '{,87}')
+
+class TestNargumentRangeArgumentParsing(ParserTestCase):
+    "Test parsing arguments when nargs sets range of options count"
+
+    argument_signatures = [Sig('positional', nargs='*'),
+        Sig('-o','--optional'),
+        Sig('--foo', nargs=(3,7))]
+    failures = ["--foo aa bb -o cc dd ee ff gg hh",
+    "--foo -o aa bb cc dd ee ff gg hh"]
+    successes = [
+        ('--foo aa bb cc dd ee ff gg hh',
+        NS(foo='aa bb cc dd ee ff gg'.split(), optional=None, positional=['hh'])),
+        ('--foo aa bb cc dd -o ee ff gg hh',
+        NS(foo='aa bb cc dd'.split(),
+           positional='ff gg hh'.split(),
+           optional='ee')),
+    ]
+
+class TestNargumentRangeArgumentParsing5(ParserTestCase):
+    "Test parsing arguments when nargs sets range of options count"
+
+    argument_signatures = [Sig('positional', nargs='*'),
+        Sig('-o','--optional'),
+        Sig('--foo', nargs=(3,None))]
+    failures = ["--foo aa bb -o cc dd ee ff gg hh ii -o jj kk"]
+    successes = [
+        ('--foo aa bb cc dd ee ff gg hh ii -o jj kk',
+        NS(foo='aa bb cc dd ee ff gg hh ii'.split(), optional='jj', positional=['kk'])),
+    ]
+
+class TestNargsRange1(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{2,4}', type=int),
+        Sig('rest', nargs='*')]
+    failures = ['1']
+    successes = [
+        ('1 2', NS(pos=[1,2], rest=[])),
+        ('1 2 3', NS(pos=[1,2,3], rest=[])),
+        ('1 2 3 4', NS(pos=[1,2,3,4], rest=[])),
+        ('1 2 3 4 bar', NS(pos=[1,2,3,4], rest=['bar'])),
+        ]
+
+class TestNargsRange2(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{2,4}', type=int),
+        Sig('rest')]
+    failures = ['1', '1 2', ]
+    successes = [
+        ('1 2 bar', NS(pos=[1,2], rest='bar')),
+        ('1 2 3', NS(pos=[1,2], rest='3')),
+        ('1 2 3 4', NS(pos=[1,2,3], rest='4')),
+        ('1 2 3 4 bar', NS(pos=[1,2,3,4], rest='bar')),
+        ]
+    # # "usage: [-h] 'pos',{2,4}\n\npositional arguments:\n  pos\n\noptional arguments:\n  -h, --help  show this help message and exit\n"
+
+class TestNargsRange3(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{2,}', type=int)]
+    failures = ['', '1']
+    successes = [
+        ('1 2', NS(pos=[1,2])),
+        ('1 2 3 4 5 6', NS(pos=[1,2,3,4,5,6])),
+        ]
+
+class TestNargsRange4(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{,2}', type=int)]
+    failures = ['1 2 3']
+    successes = [
+        ('', NS(pos=[])),
+        ('1', NS(pos=[1])),
+        ('1 2', NS(pos=[1,2])),
+        ]
+
+class TestNargsRange5(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{2,2}', type=int)]
+    failures = ['','1','1 2 3']
+    successes = [
+        ('1 2', NS(pos=[1,2])),
+        ]
+
+
+
 
 # ============================
 # from argparse import * tests

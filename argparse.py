@@ -136,6 +136,29 @@ def _ensure_value(namespace, name, value):
         setattr(namespace, name, value)
     return getattr(namespace, name)
 
+def _is_mnrep(nargs):
+    # test for are like string, {n,m}
+    # return valid nargs, or False if not valid
+    # it also converts a (m,n) tuple to equivalent {m,n} string
+    if nargs is None:
+        return False
+    if isinstance(nargs, int):
+        return False
+    if isinstance(nargs, tuple):
+        if len(nargs)==2:
+            nargs = '{%s,%s}'%nargs
+            nargs = nargs.replace('None','')
+        else:
+            raise ValueError('nargs tuple requires 2 integers')
+    m = _re.match('{(\d*),(\d*)}',nargs)
+    if m:
+        try:
+            x = _re.compile('[-A]%s'%nargs)
+            return nargs
+        except _re.error as e:
+            raise ValueError(str(e))
+    else:
+        return False
 
 # ===============
 # Formatting Help
@@ -581,7 +604,12 @@ class HelpFormatter(object):
             result = '...'
         elif action.nargs == PARSER:
             result = '%s ...' % get_metavar(1)
+        elif _is_mnrep(action.nargs):
+            result = '%s%s' % (get_metavar(1)[0], action.nargs)
         else:
+            if not isinstance(action.nargs, int):
+                valid_nargs = [None,OPTIONAL,ZERO_OR_MORE,ONE_OR_MORE,REMAINDER,PARSER]
+                raise ValueError('nargs %r not integer or %s'%(action.nargs, valid_nargs))
             formats = ['%s' for _ in range(action.nargs)]
             result = ' '.join(formats) % get_metavar(action.nargs)
         return result
@@ -1325,6 +1353,9 @@ class _ActionsContainer(object):
         if not callable(type_func):
             raise ValueError('%r is not callable' % (type_func,))
 
+        if hasattr(self, "_check_argument"):
+            self._check_argument(action)
+
         # raise an error if the metavar does not match the type
         if hasattr(self, "_get_formatter"):
             try:
@@ -1534,6 +1565,7 @@ class _ArgumentGroup(_ActionsContainer):
         self._has_negative_number_optionals = \
             container._has_negative_number_optionals
         self._mutually_exclusive_groups = container._mutually_exclusive_groups
+        self._check_argument = container._check_argument
 
     def _add_action(self, action):
         action = super(_ArgumentGroup, self)._add_action(action)
@@ -1706,6 +1738,27 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         return [action
                 for action in self._actions
                 if not action.option_strings]
+
+    def _check_argument(self, action):
+        # check action arguments
+        # focus on the arguments that the parent container does not know about
+        # check nargs and metavar tuple
+
+        # test for {m,n} rep; convert a (m,n) tuple if needed
+        try:
+            nargs = _is_mnrep(action.nargs)
+            if nargs:
+                action.nargs = nargs
+        except ValueError as e:
+            raise ArgumentError(action, str(e))
+
+        try:
+            self._get_formatter()._format_args(action, None)
+        except ValueError as e:
+            raise ArgumentError(action, str(e))
+        except TypeError:
+            #raise ValueError("length of metavar tuple does not match nargs")
+            raise ArgumentError(action, "length of metavar tuple does not match nargs")
 
     # =====================================
     # Command line argument parsing methods
@@ -2195,8 +2248,14 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         elif nargs == PARSER:
             nargs_pattern = '(-*A[-AO]*)'
 
+        # n to m arguments, nargs is re like {n,m}
+        elif _is_mnrep(nargs):
+            nargs_pattern = '([-A]%s)'%nargs
+
         # all others should be integers
         else:
+            if not isinstance(action.nargs, int):
+                raise ValueError('nargs %r not integer or valid string'%(action.nargs))
             nargs_pattern = '(-*%s-*)' % '-*'.join('A' * nargs)
 
         # if this is an optional action, -- is not allowed
