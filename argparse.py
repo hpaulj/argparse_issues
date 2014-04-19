@@ -1907,6 +1907,15 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             # and add the Positional and its args to the list
             for action, arg_count in zip(positionals, arg_counts):
                 args = arg_strings[start_index: start_index + arg_count]
+                if action.nargs not in [PARSER, REMAINDER]:
+                    pats = arg_strings_pattern[start_index: start_index + arg_count]
+                    # remove '--' corresponding to a '-' in pattern
+                    try:
+                        ii = pats.index('-')
+                        assert(args[ii]=='--')
+                        del args[ii]
+                    except ValueError:
+                        pass
                 start_index += arg_count
                 take_action(action, args)
 
@@ -2212,11 +2221,12 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
     # ========================
     def _get_values(self, action, arg_strings):
         # for everything but PARSER, REMAINDER args, strip out first '--'
-        if action.nargs not in [PARSER, REMAINDER]:
-            try:
-                arg_strings.remove('--')
-            except ValueError:
-                pass
+        #if action.nargs not in [PARSER, REMAINDER]:
+        #    try:
+        #        arg_strings.remove('--')
+        #    except ValueError:
+        #        pass
+        # we already removed '--' in consume_positionals()
 
         # optional argument produces a default when not present
         if not arg_strings and action.nargs == OPTIONAL:
