@@ -1452,7 +1452,26 @@ Other utilities
 Sub-commands
 ^^^^^^^^^^^^
 
-.. method:: ArgumentParser.add_subparsers()
+.. method:: ArgumentParser.add_subparsers([title], [description], [prog], [dest], \
+                           [required], [help], [metavar])
+
+   Create an action object which parses a command-line argument as a choice
+   from a set of parser sub-commands.  The keyword arguments include a subset of
+   those accepted by :meth:`ArgumentParser.add_argument`.
+
+   * title_ - If defined, display the sub-command choices as an argument group.
+
+   * `description` - Description of the argument group.
+
+   * `prog` - Usage prefix in the subparser help output (default uses the parser prog_).
+
+   * dest_ - :class:`Namespace` attribute to hold the sub-command name (default ``argparse.SUPPRESS``).
+
+   * required_ - Whether or not the command-line option may be omitted (default ``True``).
+
+   * help_ - A brief description of subparser group.
+
+   * metavar_ - A name for the sub-command in the usage message.
 
    Many programs split up their functionality into a number of sub-commands,
    for example, the ``svn`` program can invoke sub-commands like ``svn
@@ -1492,7 +1511,8 @@ Sub-commands
    command line (and not any other subparsers).  So in the example above, when
    the ``a`` command is specified, only the ``foo`` and ``bar`` attributes are
    present, and when the ``b`` command is specified, only the ``foo`` and
-   ``baz`` attributes are present.
+   ``baz`` attributes are present.  In this example, all argument strings after
+   subparser name ('a' or 'b') are parsed by that subparser.
 
    Similarly, when a help message is requested from a subparser, only the help
    for that particular parser will be printed.  The help message will not
@@ -1529,6 +1549,8 @@ Sub-commands
      optional arguments:
        -h, --help     show this help message and exit
        --baz {X,Y,Z}  baz help
+
+.. _title:
 
    The :meth:`add_subparsers` method also supports ``title`` and ``description``
    keyword arguments.  When either is present, the subparser's commands will

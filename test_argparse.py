@@ -1833,6 +1833,31 @@ class TestAddSubparsers(TestCase):
             args = args_str.split()
             self.assertArgumentParserError(self.parser.parse_args, args)
 
+    def test_parse_args_missing_cmd(self):
+        # test error msg when cmd is missing
+        for args_str,reg_str in [['0.5','the following arguments are required']]:
+            args = args_str.split()
+            self.assertRaisesRegexp(ArgumentParserError, reg_str,
+                self.parser.parse_args, args)
+        # was - no error (effectively optional argument)
+
+    def test_parse_args_invalid_choice(self):
+        # test error msg when cmd is wrong choice
+        for args_str,reg_str in [['0.5 0','error: argument {1,2,3}: invalid choice:']]:
+            args = args_str.split()
+            self.assertRaisesRegexp(ArgumentParserError, reg_str,
+                self.parser.parse_args, args)
+        # was - 'error: invalid choice:'
+
+    def test_required(self):
+        # test ability to change 'required'; default is True
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument('--foo', action='store_true')
+        subparsers = parser.add_subparsers(required=False)
+        parser1 = subparsers.add_parser('1')
+        parser1.add_argument('baz')
+        self.assertEqual(NS(foo=False), parser.parse_args([]))
+
     def test_parse_args(self):
         # check some non-failure cases:
         self.assertEqual(
@@ -2042,6 +2067,10 @@ class TestAddSubparsers(TestCase):
         parser = self._get_parser(aliases=True)
         self.assertArgumentParserError(parser.parse_args,
                                        '0.5 1alias3 b'.split())
+        # with metavar, the error message has not changed
+        self.assertRaisesRegexp(ArgumentParserError,
+                'error: argument COMMAND: invalid choice:',
+                parser.parse_args, '0.5 1alias3 b'.split())
 
     def test_alias_help(self):
         parser = self._get_parser(aliases=True, subparser_help=True)
