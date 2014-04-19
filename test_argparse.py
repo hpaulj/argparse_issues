@@ -1837,7 +1837,7 @@ class TestAddSubparsers(TestCase):
         # test error msg when cmd is missing
         for args_str,reg_str in [['0.5','the following arguments are required']]:
             args = args_str.split()
-            self.assertRaisesRegexp(ArgumentParserError, reg_str,
+            self.assertRaisesRegex(ArgumentParserError, reg_str,
                 self.parser.parse_args, args)
         # was - no error (effectively optional argument)
 
@@ -1845,7 +1845,7 @@ class TestAddSubparsers(TestCase):
         # test error msg when cmd is wrong choice
         for args_str,reg_str in [['0.5 0','error: argument {1,2,3}: invalid choice:']]:
             args = args_str.split()
-            self.assertRaisesRegexp(ArgumentParserError, reg_str,
+            self.assertRaisesRegex(ArgumentParserError, reg_str,
                 self.parser.parse_args, args)
         # was - 'error: invalid choice:'
 
@@ -2068,7 +2068,7 @@ class TestAddSubparsers(TestCase):
         self.assertArgumentParserError(parser.parse_args,
                                        '0.5 1alias3 b'.split())
         # with metavar, the error message has not changed
-        self.assertRaisesRegexp(ArgumentParserError,
+        self.assertRaisesRegex(ArgumentParserError,
                 'error: argument COMMAND: invalid choice:',
                 parser.parse_args, '0.5 1alias3 b'.split())
 
