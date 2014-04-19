@@ -696,6 +696,8 @@ def _get_action_name(argument):
         return argument.metavar
     elif argument.dest not in (None, SUPPRESS):
         return argument.dest
+    elif hasattr(argument, 'name'):
+        return argument.name()
     else:
         return None
 
@@ -1057,6 +1059,7 @@ class _SubParsersAction(Action):
                  prog,
                  parser_class,
                  dest=SUPPRESS,
+                 required=True,
                  help=None,
                  metavar=None):
 
@@ -1070,6 +1073,7 @@ class _SubParsersAction(Action):
             dest=dest,
             nargs=PARSER,
             choices=self._name_parser_map,
+            required=required,
             help=help,
             metavar=metavar)
 
@@ -1124,6 +1128,9 @@ class _SubParsersAction(Action):
             vars(namespace).setdefault(_UNRECOGNIZED_ARGS_ATTR, [])
             getattr(namespace, _UNRECOGNIZED_ARGS_ATTR).extend(arg_strings)
 
+    def name(self):
+        # custom name for _get_action_name()
+        return "{%s}"%','.join(self._name_parser_map)
 
 # ==============
 # Type classes
@@ -1980,6 +1987,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                                 self._get_value(action, action.default))
 
         if required_actions:
+            required_actions = ['%s'%name for name in required_actions]
             self.error(_('the following arguments are required: %s') %
                        ', '.join(required_actions))
 
@@ -1995,6 +2003,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                     names = [_get_action_name(action)
                              for action in group._group_actions
                              if action.help is not SUPPRESS]
+                    names = ['%s'%name for name in names]
                     msg = _('one of the arguments %s is required')
                     self.error(msg % ' '.join(names))
 
