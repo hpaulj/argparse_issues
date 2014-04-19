@@ -1865,8 +1865,6 @@ Exiting methods
    This method prints a usage message including the *message* to the
    standard error and terminates the program with a status code of 2.
 
-.. _upgrading-optparse-code:
-
 
 Intermixed parsing
 ^^^^^^^^^^^^^^^^^^
@@ -1906,6 +1904,8 @@ returns `rest=[1, 2, 3]`.
 two item tuple containing the populated namespace and the list of
 remaining argument strings.  :meth:`~ArgumentParser.parse_intermixed_args`
 raises an error if there are any remaining unparsed argument strings.
+
+.. _upgrading-optparse-code:
 
 Upgrading optparse code
 -----------------------
