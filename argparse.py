@@ -2224,39 +2224,28 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             self.error(msg % ' '.join(argv))
         return args
 
-    def parse_known_intermixed_args(self, args=None, namespace=None, _fallback=None):
+    def parse_known_intermixed_args(self, args=None, namespace=None):
         # self - argparse parser
         # args, namespace - as used by parse_known_args
-        # _fallback - action to take if it can't handle this parser's arguments
-        #      (default raises an error)
         # returns a namespace and list of extras
 
         # positional can be freely intermixed with optionals
         # optionals are first parsed with all positional arguments deactivated
         # the 'extras' are then parsed
+        # if parser definition is incompatible with the intermixed assumptions
+        # returns a TypeError (e.g. use of REMAINDER, subparsers)
 
-        # if positionals are 'deactivated' by setting nargs=0, then a []
-        # is added to namespace by the first parse_known_args.  This is
-        # removed before moving on to the second parse.
-        # Alternative setting nargs=SUPPRESS and default=SUPPRESS
-        # suppresses the addition of that positional to the namespace
+        # positionals are 'deactivated' by setting nargs and default to SUPPRESS.
+        # This blocks the addition of that positional to the namespace
 
         positionals = self._get_positional_actions()
         a = [action for action in positionals if action.nargs in [PARSER, REMAINDER]]
         if a:
-            if _fallback is None:
-                a = a[0]
-                err = ArgumentError(a, 'parse_intermixed_args: positional arg with nargs=%s'%a.nargs)
-                self.error(str(err))
-            else:
-                return _fallback(args, namespace)
+            raise TypeError('parse_intermixed_args: positional arg with nargs=%s'%a[0].nargs)
 
         if [action.dest for group in self._mutually_exclusive_groups
             for action in group._group_actions if action in positionals]:
-            if _fallback is None:
-                self.error('parse_intermixed_args: positional in mutuallyExclusiveGroup')
-            else:
-                return _fallback(args, namespace)
+            raise TypeError('parse_intermixed_args: positional in mutuallyExclusiveGroup')
 
         save_usage = self.usage
         try:

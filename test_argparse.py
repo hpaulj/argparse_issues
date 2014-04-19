@@ -4754,10 +4754,10 @@ class TestIntermixedArgs(TestCase):
         parser.add_argument('y', nargs='...')
         argv = 'X A B -z Z'.split()
         # intermixed fails with '...' (also 'A...')
-        # but there is a fallback mechanism
-        self.assertRaises(ArgumentParserError, parser.parse_intermixed_args, argv)
-        args, extras = parser.parse_known_intermixed_args(argv, _fallback=parser.parse_known_args)
-        self.assertEqual(NS(x='X', y=['A', 'B', '-z', 'Z'], z=None), args)
+        # self.assertRaises(TypeError, parser.parse_intermixed_args, argv)
+        with self.assertRaises(TypeError) as cm:
+            parser.parse_intermixed_args(argv)
+        self.assertRegex(str(cm.exception), '\.\.\.')
 
     def test_exclusive(self):
         # mutually exclusive group; intermixed works fine
@@ -4778,8 +4778,7 @@ class TestIntermixedArgs(TestCase):
         group.add_argument('--foo', action='store_true', help='FOO')
         group.add_argument('--spam', help='SPAM')
         group.add_argument('badger', nargs='*', default='X', help='BADGER')
-        self.assertRaises(ArgumentParserError, parser.parse_intermixed_args, [])
-        # could include a fallback example
+        self.assertRaises(TypeError, parser.parse_intermixed_args, [])
         self.assertEqual(group.required, True)
 
 class TestIntermixedMessageContentError(TestCase):
