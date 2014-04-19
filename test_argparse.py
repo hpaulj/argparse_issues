@@ -1133,7 +1133,7 @@ class TestPositionalDest(ParserTestCase):
         args = parser.parse_args(['f'])
         self.assertEqual(args.foo_bar, 'f')
         self.assertEqual(getattr(args, 'foo-bar'), 'f')
-        self.assertRaisesRegexp(AttributeError,
+        self.assertRaisesRegex(AttributeError,
                                 "'Namespace' object has no attribute 'a-b'",
                                 getattr, args, 'a-b')
 
