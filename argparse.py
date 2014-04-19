@@ -2208,6 +2208,92 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         return nargs_pattern
 
     # ========================
+    # Alt command line argument parsing, allowing free intermix
+    # ========================
+
+    def parse_intermixed_args(self, args=None, namespace=None):
+        args, argv = self.parse_known_intermixed_args(args, namespace)
+        if argv:
+            msg = _('unrecognized arguments: %s')
+            self.error(msg % ' '.join(argv))
+        return args
+
+    def parse_known_intermixed_args(self, args=None, namespace=None, _fallback=None):
+        # self - argparse parser
+        # args, namespace - as used by parse_known_args
+        # _fallback - action to take if it can't handle this parser's arguments
+        #      (default raises an error)
+        # returns a namespace and list of extras
+
+        # positional can be freely intermixed with optionals
+        # optionals are first parsed with all positional arguments deactivated
+        # the 'extras' are then parsed
+        # positionals 'deactivated' by setting nargs=0
+
+        positionals = self._get_positional_actions()
+        a = [action for action in positionals if action.nargs in [PARSER, REMAINDER]]
+        if a:
+            if _fallback is None:
+                a = a[0]
+                err = ArgumentError(a, 'parse_intermixed_args: positional arg with nargs=%s'%a.nargs)
+                self.error(str(err))
+            else:
+                return _fallback(args, namespace)
+
+        if [action.dest for group in self._mutually_exclusive_groups
+            for action in group._group_actions if action in positionals]:
+            if _fallback is None:
+                self.error('parse_intermixed_args: positional in mutuallyExclusiveGroup')
+            else:
+                return _fallback(args, namespace)
+
+        save_usage = self.usage
+        if self.usage is None:
+            # capture the full usage for use in error messages
+            self.usage = self.format_usage()[7:]
+        for action in positionals:
+            # deactivate positionals
+            action.save_nargs = action.nargs
+            action.nargs = 0
+        try:
+            namespace, remaining_args = self.parse_known_args(args, namespace)
+            for action in positionals:
+                # remove the empty positional values from namespace
+                if hasattr(namespace, action.dest):
+                    delattr(namespace, action.dest)
+        except SystemExit:
+            # warn('error from 1st parse_known_args')
+            raise
+        finally:
+            # restore nargs and usage before exiting
+            for action in positionals:
+                action.nargs = action.save_nargs
+            self.usage = save_usage
+        # logging.info('1st: %s,%s'%(namespace, remaining_args))
+        # parse positionals
+        # optionals aren't normally required, but just in case, turn that off
+        optionals = self._get_optional_actions()
+        for action in optionals:
+            action.save_required = action.required
+            action.required = False
+        for group in self._mutually_exclusive_groups:
+            group.save_required = group.required
+            group.required = False
+        try:
+            namespace, extras = self.parse_known_args(remaining_args, namespace)
+        except SystemExit:
+            # warn('error from 2nd parse_known_args')
+            raise
+        finally:
+            # restore parser values before exiting
+            for action in optionals:
+                action.required = action.save_required
+            for group in self._mutually_exclusive_groups:
+                group.required = group.save_required
+            self.usage = save_usage
+        return namespace, extras
+
+    # ========================
     # Value conversion methods
     # ========================
     def _get_values(self, action, arg_strings):
