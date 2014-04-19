@@ -1117,6 +1117,27 @@ class TestPositionalsNargsOptionalOneOrMore(ParserTestCase):
     ]
 
 
+class TestPositionalDest(ParserTestCase):
+    """Tests setting destination"""
+
+    argument_signatures = [Sig('foo-bar')]
+    failures = []
+    successes = [
+        ('f', NS(foo_bar='f')),
+    ]
+
+    def test_compatibility(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG',
+                                            description='main description')
+        parser.add_argument('foo-bar')
+        args = parser.parse_args(['f'])
+        self.assertEqual(args.foo_bar, 'f')
+        self.assertEqual(getattr(args, 'foo-bar'), 'f')
+        self.assertRaisesRegex(AttributeError,
+                                "'Namespace' object has no attribute 'a-b'",
+                                getattr, args, 'a-b')
+
+
 class TestPositionalsChoicesString(ParserTestCase):
     """Test a set of single-character choices"""
 
