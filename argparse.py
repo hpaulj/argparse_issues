@@ -2239,9 +2239,9 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
               not action.option_strings):
             if action.default is not None:
                 value = action.default
-                using_default = True
             else:
                 value = arg_strings
+            using_default = True
             self._check_value(action, value)
 
         # single argument or optional argument produces a single value
