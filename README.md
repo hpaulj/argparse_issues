@@ -28,6 +28,7 @@ master
 
 
 -----------------
+
 * 9334    argparse does not accept options taking arguments beginning with dash (regression from optparse)
 => default_to_positional; argcoffee (args_default_to_positional) 2013/04/26
 (important)
@@ -143,6 +144,7 @@ issues related to nargs
 9849 - nargswarn
 
 ----------------------
+
 issues related to usage formatting
 
 issues related to AssertionError in usage formatting
@@ -167,6 +169,7 @@ issues related to AssertionError in usage formatting
 => inner_bracket
 
 11708 - also best uses formatter from 11874 (chg '[x] [y]' to [x [y]])
+
 -----------------
 
 issues related to choices:
