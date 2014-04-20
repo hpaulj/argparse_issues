@@ -4251,6 +4251,40 @@ class TestInvalidArgumentConstructors(TestCase):
         self.assertRaises(Success, parser.add_argument, 'spam',
                           action=Action, default=Success, const=Success)
 
+    def test_nargs_value(self):
+        """test for invalid values of nargs, not integer or accepted string
+        tests parser and groups"""
+        error_msg = r"nargs (.*) not integer or"
+        error_msg = r"argument --foo: nargs (.*) not integer or \[(.*)\]"
+        error_type = argparse.ArgumentError
+        parser = ErrorRaisingArgumentParser()
+        group = parser.add_argument_group('g')
+        m = parser.add_mutually_exclusive_group()
+
+        with self.assertRaisesRegexp(error_type, error_msg):
+            parser.add_argument('--foo', nargs='1')
+        with self.assertRaisesRegexp(error_type, error_msg):
+            group.add_argument('--foo', nargs='**')
+        with self.assertRaisesRegexp(error_type, error_msg):
+            m.add_argument('--foo', nargs='1')
+
+    def test_nargs_metavar_tuple(self):
+        "test that metavar tuple matches with nargs; test parser and groups"
+        error_msg = r'length of metavar tuple does not match nargs'
+        error_type = ValueError
+        error_msg = r'argument (.*): length of metavar tuple does not match nargs'
+        error_type = argparse.ArgumentError
+        parser = ErrorRaisingArgumentParser()
+        group = parser.add_argument_group('g')
+        m = parser.add_mutually_exclusive_group()
+
+        with self.assertRaisesRegexp(error_type, error_msg):
+            parser.add_argument('-w', help='w', nargs='+', metavar=('W1',))
+        with self.assertRaisesRegexp(error_type, error_msg):
+            group.add_argument('-x', help='x', nargs='*', metavar=('X1', 'X2', 'x3'))
+        with self.assertRaisesRegexp(error_type, error_msg):
+            m.add_argument('-y', help='y', nargs=3, metavar=('Y1', 'Y2'))
+
 # ================================
 # Actions returned by add_argument
 # ================================
@@ -4720,19 +4754,23 @@ class TestParseKnownArgs(TestCase):
 
 class TestAddArgumentMetavar(TestCase):
 
-    EXPECTED_MESSAGE = "length of metavar tuple does not match nargs"
+    EXPECTED_MESSAGE = "argument --foo: length of metavar tuple does not match nargs"
+    EXPECTED_ERROR = argparse.ArgumentError
 
     def do_test_no_exception(self, nargs, metavar):
         parser = argparse.ArgumentParser()
         parser.add_argument("--foo", nargs=nargs, metavar=metavar)
 
+    #def do_test_exception(self, nargs, metavar):
+    #    parser = argparse.ArgumentParser()
+    #    with self.assertRaises(ValueError) as cm:
+    #        parser.add_argument("--foo", nargs=nargs, metavar=metavar)
+    #    self.assertEqual(cm.exception.args[0], self.EXPECTED_MESSAGE)
+
     def do_test_exception(self, nargs, metavar):
         parser = argparse.ArgumentParser()
-        with self.assertRaises(ValueError) as cm:
+        with self.assertRaisesRegex(self.EXPECTED_ERROR, self.EXPECTED_MESSAGE):
             parser.add_argument("--foo", nargs=nargs, metavar=metavar)
-        self.assertEqual(cm.exception.args[0], self.EXPECTED_MESSAGE)
-
-    # Unit tests for different values of metavar when nargs=None
 
     def test_nargs_None_metavar_string(self):
         self.do_test_no_exception(nargs=None, metavar="1")

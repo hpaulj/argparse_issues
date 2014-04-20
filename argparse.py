@@ -582,6 +582,9 @@ class HelpFormatter(object):
         elif action.nargs == PARSER:
             result = '%s ...' % get_metavar(1)
         else:
+            if not isinstance(action.nargs, int):
+                valid_nargs = [None,OPTIONAL,ZERO_OR_MORE,ONE_OR_MORE,REMAINDER,PARSER]
+                raise ValueError('nargs %r not integer or %s'%(action.nargs, valid_nargs))
             formats = ['%s' for _ in range(action.nargs)]
             result = ' '.join(formats) % get_metavar(action.nargs)
         return result
@@ -1325,6 +1328,9 @@ class _ActionsContainer(object):
         if not callable(type_func):
             raise ValueError('%r is not callable' % (type_func,))
 
+        if hasattr(self, "_check_argument"):
+            self._check_argument(action)
+
         # raise an error if the metavar does not match the type
         if hasattr(self, "_get_formatter"):
             try:
@@ -1534,6 +1540,7 @@ class _ArgumentGroup(_ActionsContainer):
         self._has_negative_number_optionals = \
             container._has_negative_number_optionals
         self._mutually_exclusive_groups = container._mutually_exclusive_groups
+        self._check_argument = container._check_argument
 
     def _add_action(self, action):
         action = super(_ArgumentGroup, self)._add_action(action)
@@ -1706,6 +1713,18 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         return [action
                 for action in self._actions
                 if not action.option_strings]
+
+    def _check_argument(self, action):
+        # check action arguments
+        # focus on the arguments that the parent container does not know about
+        # check nargs and metavar tuple
+        try:
+            self._get_formatter()._format_args(action, None)
+        except ValueError as e:
+            raise ArgumentError(action, str(e))
+        except TypeError:
+            #raise ValueError("length of metavar tuple does not match nargs")
+            raise ArgumentError(action, "length of metavar tuple does not match nargs")
 
     # =====================================
     # Command line argument parsing methods
@@ -2197,6 +2216,8 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
         # all others should be integers
         else:
+            if not isinstance(action.nargs, int):
+                raise ValueError('nargs %r not integer or valid string'%(action.nargs))
             nargs_pattern = '(-*%s-*)' % '-*'.join('A' * nargs)
 
         # if this is an optional action, -- is not allowed
