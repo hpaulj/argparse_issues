@@ -2018,6 +2018,13 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             selected_pattern = arg_strings_pattern[start_index:]
             arg_counts = match_partial(positionals, selected_pattern)
 
+            # if we haven't hit the end of the command line strings,
+            # then don't consume any final zero-width arguments yet
+            # (we may need to parse some more optionals first)
+            if start_index + sum(arg_counts) != len(arg_strings_pattern):
+                while arg_counts and arg_counts[-1] == 0:
+                    arg_counts.pop()
+
             # slice off the appropriate arg strings for each Positional
             # and add the Positional and its args to the list
             for action, arg_count in zip(positionals, arg_counts):

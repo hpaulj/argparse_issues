@@ -1481,6 +1481,56 @@ class TestNargsRemainder(ParserTestCase):
     ]
 
 
+class TestNargsOneOrMoreDeferred(ParserTestCase):
+    """Tests specifying a positional with nargs='*' that must be deferred"""
+
+    argument_signatures = [
+        Sig('-x', action='store_true'),
+        Sig('y'),
+        Sig('z', nargs='*'),
+    ]
+    failures = ['', '-x']
+    successes = [
+        ('Y', NS(x=False, y='Y', z=[])),
+        ('Y -x', NS(x=True, y='Y', z=[])),
+        ('Y -x Z Z', NS(x=True, y='Y', z=['Z', 'Z'])),
+    ]
+
+
+class TestNargsZeroOrOneDeferred(ParserTestCase):
+    """Tests specifying a positional with nargs='?' that must be deferred"""
+
+    argument_signatures = [
+        Sig('-x', action='store_true'),
+        Sig('y'),
+        Sig('z', nargs='?'),
+    ]
+    failures = ['', '-x']
+    successes = [
+        ('Y', NS(x=False, y='Y', z=None)),
+        ('Y -x', NS(x=True, y='Y', z=None)),
+        ('Y -x Z', NS(x=True, y='Y', z='Z')),
+    ]
+
+
+class TestNargsMultipleDeferred(ParserTestCase):
+    """Tests specifying a positional multiple nargs that must be deferred"""
+
+    argument_signatures = [
+        Sig('-w', action='store_true'),
+        Sig('x'),
+        Sig('y', nargs='?'),
+        Sig('z', nargs='*'),
+    ]
+    failures = ['', '-x']
+    successes = [
+        ('X', NS(w=False, x='X', y=None, z=[])),
+        ('X -w', NS(w=True, x='X', y=None, z=[])),
+        ('X -w Y', NS(w=True, x='X', y='Y', z=[])),
+        ('X -w Y Z', NS(w=True, x='X', y='Y', z=['Z'])),
+    ]
+
+
 class TestOptionLike(ParserTestCase):
     """Tests options that may or may not be arguments"""
 
