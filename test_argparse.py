@@ -2290,6 +2290,7 @@ class TestParentParsers(TestCase):
 
 class TestMutuallyExclusiveGroupErrors(TestCase):
 
+    @unittest.skip # title is now ok
     def test_invalid_add_argument_group(self):
         parser = ErrorRaisingArgumentParser()
         raises = self.assertRaises
@@ -2647,6 +2648,43 @@ class TestMutuallyExclusiveInGroup(MEMixin, TestCase):
           --baz BAZ   baz help
         '''
 
+class TestMutuallyExclusiveTitledGroup(MEMixin, TestCase):
+
+    def get_parser(self, required=None):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        mutex_group = \
+            parser.add_mutually_exclusive_group(required=required, \
+            title='Titled group', description='Group description')
+        mutex_group.add_argument('--bar', help='bar help')
+        mutex_group.add_argument('--baz', help='baz help')
+        return parser
+
+    failures = ['--bar X --baz Y', '--baz X --bar Y']
+    successes = [
+        ('--bar X', NS(bar='X', baz=None)),
+        ('--baz Y', NS(bar=None, baz='Y')),
+    ]
+    successes_when_not_required = [
+        ('', NS(bar=None, baz=None)),
+    ]
+
+    usage_when_not_required = '''\
+        usage: PROG [-h] [--bar BAR | --baz BAZ]
+        '''
+    usage_when_required = '''\
+        usage: PROG [-h] (--bar BAR | --baz BAZ)
+        '''
+    help = '''\
+
+        optional arguments:
+          -h, --help  show this help message and exit
+
+        Titled group:
+          Group description
+
+          --bar BAR   bar help
+          --baz BAZ   baz help
+        '''
 
 class TestMutuallyExclusiveOptionalsAndPositionalsMixed(MEMixin, TestCase):
 
