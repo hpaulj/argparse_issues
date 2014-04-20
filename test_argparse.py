@@ -2066,6 +2066,124 @@ class TestAddSubparsers(TestCase):
                 3                   3 help
             """))
 
+#===============
+# Subparsers ambiguity tests
+#===============
+
+class TestSubparserOptionals(TestCase):
+    """Test subparser arguments that may be ambiguous in base parser
+    argparse would issue
+    'error: ambiguous option: --foo could match --foo1, --foo2'
+    even though --foo is an argument of subparser
+    subparsers used to be required; but a change in required testing
+    changed that.
+    Test both ways with explicited 'required' attribute setting
+    """
+    def assertArgumentParserError(self, *args, **kwargs):
+        self.assertRaises(ArgumentParserError, *args, **kwargs)
+
+    def setUp(self):
+        parser = ErrorRaisingArgumentParser()
+        parser.scan = True # testing switch
+        parser.add_argument('--foo1','--bar1', action='store_true')
+        parser.add_argument('--foo2','--bar2', action='store_true')
+        subparsers = parser.add_subparsers(dest='cmd')
+        cmd1 = subparsers.add_parser('cmd1')
+        cmd1.add_argument('--foo', action='store_true')
+        cmd2 = subparsers.add_parser('cmd2')
+        # nested subparser
+        sub2 = cmd2.add_subparsers(dest='sub')
+        sub2.required = True
+        cmd21 = sub2.add_parser('cmd21')
+        cmd21.add_argument('--bar', action='store_true')
+        self.parser = parser
+        self.subparsers = subparsers
+
+    def test_parse_args_failures_required(self):
+        self.subparsers.required = True
+        for args_str in [
+            '',
+            '--foo1',
+            '--foo',
+            '--foo cmd1',
+            ]:
+            args = args_str.split()
+            self.assertArgumentParserError(self.parser.parse_args, args)
+
+    def test_parse_args_errormsg(self):
+        """test error message; issue arose because argparse used issue
+        rror: ambiguous option: --foo could match --foo1, --foo2"""
+        for args_str, regex in [
+            ['--foo', '[required|unrecognized]'],
+            ['--foo cmd1', 'unrecognized'],
+            ]:
+            args = args_str.split()
+            with self.assertRaises(ArgumentParserError) as cm:
+                self.parser.parse_args(args)
+            msg = str(cm.exception)
+            self.assertRegex(msg, regex)
+            self.assertNotRegex(msg, 'ambiguous option')
+
+    def test_parse_args_required(self):
+        self.subparsers.required = True
+        self.assertEqual(
+            self.parser.parse_args('cmd1 --foo'.split()),
+            NS(cmd='cmd1', foo=True, foo1=False, foo2=False),
+        )
+        self.assertEqual(
+            self.parser.parse_args('--foo1 cmd1 --foo'.split()),
+            NS(cmd='cmd1', foo=True, foo1=True, foo2=False),
+        )
+
+    def test_parse_args_failures_notrequired(self):
+        self.subparsers.required = False
+        for args_str in [
+            '--foo',
+            '--foo cmd1',
+            ]:
+            args = args_str.split()
+            self.assertArgumentParserError(self.parser.parse_args, args)
+
+    def test_parse_args_notrequired(self):
+        self.subparsers.required = False
+        self.assertEqual(
+            self.parser.parse_args('cmd1 --foo'.split()),
+            NS(cmd='cmd1', foo=True, foo1=False, foo2=False),
+        )
+        self.assertEqual(
+            self.parser.parse_args('--foo1 cmd1 --foo'.split()),
+            NS(cmd='cmd1', foo=True, foo1=True, foo2=False),
+        )
+
+    def test_parse_args_failures_sub(self):
+        "test that involves 2 levels of subparsers"
+        self.subparsers.required = True
+        for args_str in [
+            '',
+            '--bar1',
+            '--bar',
+            '--bar cmd2',
+            'cmd2 --bar cmd21',
+            '--bar1 cmd2 --bar',
+            ]:
+            args = args_str.split()
+            self.assertArgumentParserError(self.parser.parse_args, args)
+
+    def test_parse_args_sub(self):
+        """ensure that testing is recursive
+        without fix gives error
+        'ambiguous option: --bar could match --bar1, --bar2'
+        """
+        self.subparsers.required = True
+        self.assertEqual(
+            self.parser.parse_args('cmd2 cmd21 --bar'.split()),
+            NS(cmd='cmd2', bar=True, foo1=False, foo2=False, sub='cmd21'),
+        )
+        self.assertEqual(
+            self.parser.parse_args('--bar1 cmd2 cmd21 --bar'.split()),
+            NS(cmd='cmd2', bar=True, foo1=True, foo2=False, sub='cmd21'),
+        )
+
 # ============
 # Groups tests
 # ============
