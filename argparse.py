@@ -2227,6 +2227,20 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # return the list of arg string counts
         return result
 
+    def _get_nested_action(self, arg_string):
+        # recursively seek arg_string in subparsers
+        if self._subparsers is not None:
+            for action in self._subparsers._actions:
+                if isinstance(action, _SubParsersAction):
+                    for parser in action._name_parser_map.values():
+                        if arg_string in parser._option_string_actions:
+                            return parser._option_string_actions[arg_string]
+                        else:
+                            sub_action = parser._get_nested_action(arg_string)
+                            if sub_action is not None:
+                                return sub_action
+        return None
+
     def _parse_optional(self, arg_string):
         # if it's an empty string, it was meant to be a positional
         if not arg_string:
@@ -2240,6 +2254,13 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         if arg_string in self._option_string_actions:
             action = self._option_string_actions[arg_string]
             return action, arg_string, None
+
+        if getattr(self, 'scan', True):
+            # parser.scan temporary testing switch
+            # if arg_string is found in a subparser, treat as an unknown
+            # optional
+            if self._get_nested_action(arg_string):
+                return None, arg_string, None
 
         # if it's just a single character, it was meant to be positional
         if len(arg_string) == 1:
