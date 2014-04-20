@@ -1,0 +1,180 @@
+issue 16468
+
+
+This patch generally deals with the choices option, and specifically the
+problems with formatting long lists, or objects that have __contains__
+but not __iter__.  But it also incorporates issues 9849 (better add_argument
+testing) and 9625 (choices with *).
+
+As noted by other posters, there are 3 places where the choices is formatted
+with a comprehension.  I have refactored these into one _format_choices function.
+
+_format_choices() is a utility function that formats the choices by
+iteration, and failing that using repr().  It raises an error if choices does not even have
+a __contains__.  It also has a summarize option ({1,2,3,...,19,20}). I
+did not make this an action method because it only uses the choices
+object.
+
+_metavar_formatter() - calls _format_choices for Usage with the default compact form.
+Its use of metavar gives the user full control of the choices display.
+
+_expand_help() - calls _format_choices with the looser format.  This form
+is used only if the user puts a '%(choices)s' in the help string.  This is
+not documented, and only appears a few times in the test file.  Again the
+user has full control over display.
+
+_check_value() - calls _format_choices with a 'summarize=15' option.  Normally
+this error message appears with the usage message.  So it does not need
+to use the metavar.
+
+--------------------
+other changes:
+
+formatter _format_actions_usage() - I tweaked the regex that trims excess
+notation from mutually exclusive groups.  This removed '()' from other
+parts of the usage line, for example a metavar like 'range(20)'.
+
+formatter _format_args() - I included issue 9849 changes which improve
+testing for nargs, and array metavars.  This calls the _metavar_formatter.
+
+Issue 9849 also changes container add_argument to call the parser
+_check_argument.  This in turn calls _format_args to test action
+options like nargs, metavars, and now choices.  If there are problems
+it raises an ArgumentError.
+
+parser _get_values() - issue 9625 changes this to correctly handle choices
+when nargs='*'.
+
+parser _check_value() - I rewrote this to give better errors if there
+are problems with __contains__.  If choices is a string (e.g. 'abc') it
+converts it to a list, so __contains__ is more consistent.  For example,
+'bc' in 'abc' is True, but 'bc' in ['a','b','c'] is False (issue 16977)
+
+----------------------
+test_argparse
+
+change string choices to lists
+
+class TestAddArgumentMetavar
+    change EXPECTED_MESSAGE and EXPECTED_ERROR to reflect issue 9849 changes
+
+class TestMetavarWithParen
+    tests of 'range(n)' choices
+    make sure () in the metavar are preserved
+    test that metavar is used in Usage if given
+    test summarized list of choices in the error message
+    test the %(choices)s case
+
+class TestNonIterableChoices
+    tests with container that __contains__ but not __iter__
+    tests that repr() is used as needed
+
+class TestBareChoices
+    a class without even __contains__
+    test for add_argument error
+
+class TestStringChoices
+    test expansion of 'abc' to ['a','b','c']
+
+
+
+
+=====================================================================
+
+
+
+
+
+
+
+
+
+
+changes
+
+improved add_argument testing/error message, issue 9849
+    calls _format_args
+
+_format_choices - utility
+    use iteration
+    try to use repr
+    option of choosing repr if too many choices
+
+format_metavar
+    used in usage, 2nd col of help
+    presidence:
+        explicit metavar  (never use DEST?)
+        compact list
+        repr
+
+expand_help  %(choice)s
+    this use is not document in the .rst
+    use:
+        expanded list
+        repr
+
+check_value
+    turn string into list to give more consistent 'in'
+    guard 'in' (list in is robust, string not so (but no longer string))
+    error - does it need full list; what about usage part of error msg
+
+    use:
+        compact list
+        repr
+
+ShortestChoicesFormatter
+    call _format_choices with a 'crossover' value
+    use this instead of adding variable/option to parser or action
+
+tests
+    need to add one for choices that does not have 'in'
+    with usage does check_value need the extra choices info?
+
+how about using a metavar 'fn' or keyword to control repr, long, short etc?
+
+SO: for the usage case, use of 'repr' to avoid error messages with weird choice
+classes is desirable, but the metavar option gives user full control over the
+display.
+
+For the expanded help case, simply omitting the %(choices)s gives the user
+full control.  Plus it isn't well documented.
+
+That leaves the check_value error message.  I think error catching needs to
+be improved here.  I also think excessively large error strings should be avoided,
+but I'm not sure about the strategy.  Since the usage is normally displayed with
+errors, the error message does not need added info from the metavar.
+? is it possible to show the help line for that action?
+the idea of some sort of ellipsis in the choice list sounds attractive.
+Build an 'ellipsis' option into the format_choices function?
+
+
+2 common errors from formatting:
+TypeError: not enough arguments for format string
+TypeError: not all arguments converted during string formatting
+
+i.e. less arg than %s, or more arg than %s
+
+in _format_args, 1st call _metavar_formatter to get metavar.
+_format_choices is called here, so if that has problems that's where the error occurs
+
+the rest does one form or other of '%s'%() giving rise to mismatch between
+#metavar and nargs.
+it can also raise ValueError regarding value of nargs
+
+in _choices_format, should 'in' produce ValueError or TypeError (or other)
+
+in check_argument, ValueError changed to ArgumentError with same message
+TypeError was changed to ArgumentError with new metavar/nargs message
+
+what error should _format_choices raise?
+   ValueError to pass msg through?
+   TypeError and require re.match?
+
+' ' in Foo() gives
+TypeError: argument of type 'Foo' is not iterable
+if Foo not have __contains__
+TypeError: 'Foo' object is not iterable
+if Foo not have __iter__
+or could get
+AttributeError: 'Foo' object has no attribute '__iter__'
+

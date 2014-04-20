@@ -627,7 +627,7 @@ class TestOptionalsChoices(ParserTestCase):
     """Tests specifying the choices for an Optional"""
 
     argument_signatures = [
-        Sig('-f', choices='abc'),
+        Sig('-f', choices=['a', 'b', 'c']),
         Sig('-g', type=int, choices=range(5))]
     failures = ['a', '-f d', '-fad', '-ga', '-g 6']
     successes = [
@@ -1800,14 +1800,14 @@ class TestAddSubparsers(TestCase):
             parser1_kwargs['aliases'] = ['1alias1', '1alias2']
         parser1 = subparsers.add_parser('1', **parser1_kwargs)
         parser1.add_argument('-w', type=int, help='w help')
-        parser1.add_argument('x', choices='abc', help='x help')
+        parser1.add_argument('x', choices=['a', 'b', 'c'], help='x help')
 
         # add second sub-parser
         parser2_kwargs = dict(description='2 description')
         if subparser_help:
             parser2_kwargs['help'] = '2 help'
         parser2 = subparsers.add_parser('2', **parser2_kwargs)
-        parser2.add_argument('-y', choices='123', help='y help')
+        parser2.add_argument('-y', choices=['1', '2', '3'], help='y help')
         parser2.add_argument('z', type=complex, nargs='*', help='z help')
 
         # add third sub-parser
@@ -3562,7 +3562,7 @@ class TestHelpVariableExpansion(HelpTestCase):
             help='x %(prog)s %(default)s %(type)s %%'),
         Sig('-y', action='store_const', default=42, const='XXX',
             help='y %(prog)s %(default)s %(const)s'),
-        Sig('--foo', choices='abc',
+        Sig('--foo', choices=['a', 'b', 'c'],
             help='foo %(prog)s %(default)s %(choices)s'),
         Sig('--bar', default='baz', choices=[1, 2], metavar='BBB',
             help='bar %(prog)s %(default)s %(dest)s'),
@@ -4720,7 +4720,9 @@ class TestParseKnownArgs(TestCase):
 
 class TestAddArgumentMetavar(TestCase):
 
-    EXPECTED_MESSAGE = "length of metavar tuple does not match nargs"
+    # EXPECTED_MESSAGE = "length of metavar tuple does not match nargs"
+    EXPECTED_MESSAGE = "argument --foo: length of metavar tuple does not match nargs"
+    EXPECTED_ERROR = argparse.ArgumentError
 
     def do_test_no_exception(self, nargs, metavar):
         parser = argparse.ArgumentParser()
@@ -4728,9 +4730,10 @@ class TestAddArgumentMetavar(TestCase):
 
     def do_test_exception(self, nargs, metavar):
         parser = argparse.ArgumentParser()
-        with self.assertRaises(ValueError) as cm:
+        # with self.assertRaises(ValueError) as cm:
+        with self.assertRaisesRegex(self.EXPECTED_ERROR, self.EXPECTED_MESSAGE):
             parser.add_argument("--foo", nargs=nargs, metavar=metavar)
-        self.assertEqual(cm.exception.args[0], self.EXPECTED_MESSAGE)
+        # self.assertEqual(cm.exception.args[0], self.EXPECTED_MESSAGE)
 
     # Unit tests for different values of metavar when nargs=None
 
@@ -4884,6 +4887,159 @@ class TestAddArgumentMetavar(TestCase):
 
     def test_nargs_3_metavar_length3(self):
         self.do_test_no_exception(nargs=3, metavar=("1", "2", "3"))
+
+# ==========================
+# metavar with ()
+# ==========================
+
+class TestMetavarWithParen(TestCase):
+    "MutuallyExclusiveGroup trimming should not remove () from metavars"
+    def test_default_formatting(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", type=int, choices=range(10))
+        cm = parser.format_usage()
+        self.assertRegex(cm, r"\[-h\] \[--foo {0,1,2,3,4,5,6,7,8,9}\]\n")
+
+    def test_format_with_metavar(self):
+        # represent choices with the metavar
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", type=int, choices=range(20), metavar='range 20')
+        cm = parser.format_usage()
+        self.assertRegex(cm, r'usage: (.*) \[\-h\] \[--foo range 20\]\n')
+
+    def test_format_with_paren_usage(self):
+        # test a fix that preserves () in the metavar
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", type=int, choices=range(20), metavar='range(0,20)')
+        cm = parser.format_usage()
+        self.assertRegex(cm, r'usage: (.*) \[-h\] \[--foo range\(0,20\)\]\n')
+
+    def test_format_with_summarize(self):
+        # the metavar has no effect on the error message
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", type=int, choices=range(20), metavar='range(0,20)')
+        self.assertEqual(parser.parse_args(['--foo','1']), NS(foo=1))
+
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args(['--foo','21'])
+        msg = str(cm.exception)
+        self.assertRegex(msg, r'invalid choice')
+        self.assertNotIn(msg, r'range\(0,20\)')
+        # range large enough to trigger list summarizing
+        self.assertRegex(msg, r'choose from {0,1,2,3,4,5,...,18,19}')
+
+    def test_format_with_paren_help(self):
+        # %(choices)s in help, prefer default over metavar
+        # this feature is not documented
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", type=int, choices=list(range(10)),
+            metavar='range(0,10)', help='int from %(choices)s')
+        cm = parser.format_help()
+        #print(cm)
+        self.assertRegex(cm, r'--foo range\(0,10\)  int from 0, 1, 2, 3, 4, 5, 6, 7, 8, 9')
+
+# ==========================
+# Non iterable choices
+# ==========================
+
+class TestNonIterableChoices(TestCase):
+    # partial test of Issue 16418 and 16468
+    # choices is a container with __contains__ but not __iter__
+    # so words with the 'in' operator, but not 'for in'
+    class NonIterableContainer:
+        def __init__(self, container, description):
+            self.container = container
+            self.description = description
+        def __repr__(self):
+            return self.description
+        def __contains__(self, item):
+            return item in self.container
+    abcChoices = NonIterableContainer(['a','b','c'], 'NIC(abc)')
+
+    def test_use_of_repr(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument('--foo', choices=self.abcChoices)
+        self.assertEqual(parser.parse_args(['--foo','a']), NS(foo='a'))
+        cm = parser.format_usage()
+        self.assertRegex(cm, r'NIC\(abc\)')
+
+    def test_use_of_metavar(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument('--foo', choices=self.abcChoices, metavar='NIC(abc)')
+        self.assertEqual(parser.parse_args(['--foo','a']), NS(foo='a'))
+        cm = parser.format_usage()
+        self.assertRegex(cm, r'\[--foo NIC\(abc\)\]')
+
+    @unittest.skip("fixed error message")
+    def test_parse_TypeError(self):
+        # error here should be addressed by issue 16468
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument('--foo', choices=self.abcChoices, metavar='NIC(abc)')
+        self.assertEqual(parser.parse_args(['--foo','a']), NS(foo='a'))
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args(['--foo','d'])
+        msg = str(cm.exception)
+        self.assertRegex(msg, "'NonIterableContainer' object is not iterable")
+
+    def test_parse_ArgumentError(self):
+        # error here should be addressed by issue 16468
+        # for code that returns an ArgumentError rather than TypeError
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument('--foo', choices=self.abcChoices, metavar='NIC(abc)')
+        self.assertEqual(parser.parse_args(['--foo','a']), NS(foo='a'))
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args(['--foo','d'])
+        msg = str(cm.exception)
+        self.assertRegex(msg, r"invalid choice: 'd' \(choose from NIC\(abc\)\)")
+
+
+class TestBareChoices(TestCase):
+    # test a choices object that does not accept the in operator
+    # add_argument should raise error
+    class Bare:
+        def __repr__(self):
+            return 'BareObject'
+    def test_error_raising(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        with self.assertRaises(argparse.ArgumentError) as cm:
+            parser.add_argument('--foo', type=int,choices=self.Bare())
+        msg = str(cm.exception)
+        self.assertRegex(msg, 'choices must support the in operator')
+
+# ==========================
+# string choices
+# ==========================
+
+class TestStringChoices(TestCase):
+    "string choices are flaky"
+    def test_format_expands_to_list(self):
+        full = r"\[-h\] \[--foo {a,b,c}\]\n"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", choices='abc')
+        cm = parser.format_usage()
+        self.assertRegex(cm, full)
+
+    def test_parse_admits_substring_not(self):
+        # 'bc' in 'abc' is True, but 'bc' in list('abc') is not
+        # _check_value now converts 'abc' to list
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", choices='abc')
+        self.assertEqual(parser.parse_args(['--foo','a']), NS(foo='a'))
+        #self.assertEqual(parser.parse_args(['--foo','bc']), NS(foo='bc'))
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args(['--foo','bc'])
+        msg = str(cm.exception)
+        self.assertRegex(msg, "invalid choice: 'bc' \(choose from {a,b,c}\)")
+
+    def test_parse_list_does_not_admit_substring(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", choices=list('abc'))
+        self.assertEqual(parser.parse_args(['--foo','a']), NS(foo='a'))
+        # self.assertEqual(parser.parse_args(['--foo','bc']), NS(foo='bc'))
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args(['--foo','bc'])
+        msg = str(cm.exception)
+        self.assertRegex(msg, "invalid choice: 'bc' \(choose from {a,b,c}\)")
 
 # ============================
 # from argparse import * tests
