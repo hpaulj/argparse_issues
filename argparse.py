@@ -567,7 +567,8 @@ class HelpFormatter(object):
     def _format_action_invocation(self, action):
         if not action.option_strings:
             default = self._get_default_metavar_for_positional(action)
-            metavar, = self._metavar_formatter(action, default)(1)
+            metavar = self._metavar_formatter(action, default)(1)
+            metavar = '|'.join(metavar)
             return metavar
 
         else:
