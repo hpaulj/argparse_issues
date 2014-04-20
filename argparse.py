@@ -1801,12 +1801,15 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
         def take_action(action, argument_strings, option_string=None):
             seen_actions.add(action)
-            argument_values = self._get_values(action, argument_strings)
+            argument_values, using_default = self._get_values(action, argument_strings)
 
             # error if this argument is not allowed with other previously
             # seen arguments, assuming that actions that use the default
             # value don't really count as "present"
-            if argument_values is not action.default:
+            # refine test so that only values set by _get_values() to
+            # action.default count as not-really-present
+
+            if not using_default:
                 seen_non_default_actions.add(action)
                 for conflict_action in action_conflicts.get(action, []):
                     if conflict_action in seen_non_default_actions:
@@ -2212,6 +2215,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
     # ========================
     def _get_values(self, action, arg_strings):
         # for everything but PARSER, REMAINDER args, strip out first '--'
+        using_default = False
         if action.nargs not in [PARSER, REMAINDER]:
             try:
                 arg_strings.remove('--')
@@ -2224,6 +2228,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 value = action.const
             else:
                 value = action.default
+                using_default = True
             if isinstance(value, str):
                 value = self._get_value(action, value)
                 self._check_value(action, value)
@@ -2234,6 +2239,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
               not action.option_strings):
             if action.default is not None:
                 value = action.default
+                using_default = True
             else:
                 value = arg_strings
             self._check_value(action, value)
@@ -2260,7 +2266,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 self._check_value(action, v)
 
         # return the converted value
-        return value
+        return value, using_default
 
     def _get_value(self, action, arg_string):
         type_func = self._registry_get('type', action.type, action.type)

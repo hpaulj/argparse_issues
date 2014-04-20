@@ -2689,6 +2689,52 @@ class TestMutuallyExclusiveOptionalsAndPositionalsMixed(MEMixin, TestCase):
           -c          c help
         '''
 
+
+class TestMutuallyExclusiveDefaults(MEMixin, TestCase):
+    '''Narrow seen_non_default_actions criteria:
+    _get_values() sets argument_values = action.default only for positionals
+    with empty strings and '?*' nargs.  Optionals with a value that equals
+    (or 'is') the default don't count
+    '''
+    def get_parser(self, required=None):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        group = parser.add_mutually_exclusive_group(required=required)
+        group.add_argument('--foo', default='test')
+        group.add_argument('--bar', default='test')
+        group.add_argument('--small', type=int, default=42)
+        group.add_argument('--large', type=int, default=257)
+        return parser
+
+    failures = ['--foo X --bar Y',
+                '--small 0 --large 34',
+                '--foo test --bar Y',
+                '--large 257 --foo X',
+                '--small 42 --foo X',
+                ]
+    successes = [
+        ('--foo X', NS(bar='test', foo='X', large=257, small=42)),
+        ('--small 42', NS(bar='test', foo='test', large=257, small=42)),
+    ]
+    successes_when_not_required = [
+        ('', NS(foo='test', bar='test', small=42, large=257)),
+    ]
+    usage_when_required = '''\
+        usage: PROG [-h] (--foo FOO | --bar BAR | --small SMALL | --large LARGE)
+        '''
+    usage_when_not_required = '''\
+        usage: PROG [-h] [--foo FOO | --bar BAR | --small SMALL | --large LARGE]
+        '''
+    help = '''\
+
+        optional arguments:
+          -h, --help     show this help message and exit
+          --foo FOO
+          --bar BAR
+          --small SMALL
+          --large LARGE
+        '''
+
+
 # =================================================
 # Mutually exclusive group in parent parser tests
 # =================================================
