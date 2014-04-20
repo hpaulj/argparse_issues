@@ -1824,10 +1824,13 @@ Mutual exclusion
      usage: PROG [-h] (--foo | --bar)
      PROG: error: one of the arguments --foo --bar is required
 
-   Note that currently mutually exclusive argument groups do not support the
+   (remove) Note that currently mutually exclusive argument groups do not support the
    *title* and *description* arguments of
    :meth:`~ArgumentParser.add_argument_group`.
 
+   If a mutually exclusive argument group has *title* and *description*
+   arguments, it will be nested in an argument group defined by
+   those arguments.
 
 Parser defaults
 ^^^^^^^^^^^^^^^

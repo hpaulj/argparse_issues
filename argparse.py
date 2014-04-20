@@ -1403,8 +1403,17 @@ class _ActionsContainer(object):
         return group
 
     def add_mutually_exclusive_group(self, **kwargs):
-        group = _MutuallyExclusiveGroup(self, **kwargs)
-        self._mutually_exclusive_groups.append(group)
+        # works with and without a title
+        if 'title' in kwargs:
+            args = kwargs.copy()
+            args.pop('required', None)
+            container = self.add_argument_group(**args)
+        else:
+            container = self
+        kwargs.pop('title', None)
+        kwargs.pop('description', None)
+        group = _MutuallyExclusiveGroup(container, **kwargs)
+        container._mutually_exclusive_groups.append(group)
         return group
 
     def _add_action(self, action):
