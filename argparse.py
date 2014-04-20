@@ -1581,6 +1581,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         - argument_default -- The default value for all arguments
         - conflict_handler -- String indicating how to handle conflicts
         - add_help -- Add a -h/-help option
+        - help_groups -- Names of the base argument groups
     """
 
     def __init__(self,
@@ -1594,6 +1595,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                  fromfile_prefix_chars=None,
                  argument_default=None,
                  conflict_handler='error',
+                 help_groups=None,
                  add_help=True):
 
         superinit = super(ArgumentParser, self).__init__
@@ -1612,10 +1614,21 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         self.formatter_class = formatter_class
         self.fromfile_prefix_chars = fromfile_prefix_chars
         self.add_help = add_help
+        self.help_groups = []
 
-        add_group = self.add_argument_group
-        self._positionals = add_group(_('positional arguments'))
-        self._optionals = add_group(_('optional arguments'))
+        # create the base argument groups
+        # replace the names with the groups
+        # these groups are also in self._action_groups
+        # but it is handy to have them lists separately
+        # from ones that the user explicitely creates and fills
+        # generalizes ._positionals and ._optionals
+        if help_groups is None:
+            help_groups = ['positional arguments','optional arguments']
+        elif isinstance(help_groups,list) and len(help_groups)==0:
+            # require at least one base group
+            help_groups = ['arguments']
+        for i, name in enumerate(help_groups):
+            self.help_groups.append(self.add_argument_group(_(name)))
         self._subparsers = None
 
         # register types
@@ -1671,7 +1684,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             description = _(kwargs.pop('description', None))
             self._subparsers = self.add_argument_group(title, description)
         else:
-            self._subparsers = self._positionals
+            self._subparsers = self._action_groups[0]
 
         # prog defaults to the usage message of this parser, skipping
         # optional arguments and with no "usage:" prefix
@@ -1691,10 +1704,31 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         return action
 
     def _add_action(self, action):
-        if action.option_strings:
-            self._optionals._add_action(action)
+        # Add action to one of the base groups
+        groups = self.help_groups
+        num_base_groups = len(groups)
+        if num_base_groups==0:
+            # if there aren't any groups, action can be added to self directly
+            # but it simpler if at least one group has been defined
+            action = super(ArgumentParser, self)._add_action(action)
+        elif num_base_groups==1:
+            groups[0]._add_action(action)
+        elif num_base_groups==2:
+            # default positional and optional groups
+            if action.option_strings:
+                groups[1]._add_action(action)
+            else:
+                groups[0]._add_action(action)
+        elif num_base_groups==3:
+            if action.option_strings:
+                if action.required:
+                    groups[1]._add_action(action) # required
+                else:
+                    groups[2]._add_action(action) # optionals
+            else:
+                groups[0]._add_action(action) # positionals
         else:
-            self._positionals._add_action(action)
+            raise ValueError('too many help groups')
         return action
 
     def _get_optional_actions(self):
