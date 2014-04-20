@@ -3859,6 +3859,32 @@ class TestHelpTupleMetavar(HelpTestCase):
         '''
     version = ''
 
+class TestHelpPositionalTupleMetavar(HelpTestCase):
+    """Test specifying metavar of a positional as a tuple"""
+
+    parser_signature = Sig(prog='PROG')
+    argument_signatures = [
+        Sig('w', help='w', nargs='+', metavar=('W1', 'W2')),
+        Sig('x', help='x', nargs='*', metavar=('X1', 'X2')),
+        Sig('y', help='y', nargs=3, metavar=('Y1', 'Y2', 'Y3')),
+        Sig('z', help='z', nargs='?', metavar=('Z1', )),
+    ]
+    argument_group_signatures = []
+    usage = '''\
+        usage: PROG [-h] W1 [W2 ...] [X1 [X2 ...]] Y1 Y2 Y3 [Z1]
+        '''
+    help = usage + '''\
+
+        positional arguments:
+          W1|W2       w
+          X1|X2       x
+          Y1|Y2|Y3    y
+          Z1          z
+
+        optional arguments:
+          -h, --help  show this help message and exit
+        '''
+    version = ''
 
 class TestHelpRawText(HelpTestCase):
     """Test the RawTextHelpFormatter"""
