@@ -4261,11 +4261,11 @@ class TestInvalidArgumentConstructors(TestCase):
         group = parser.add_argument_group('g')
         m = parser.add_mutually_exclusive_group()
 
-        with self.assertRaisesRegexp(error_type, error_msg):
+        with self.assertRaisesRegex(error_type, error_msg):
             parser.add_argument('--foo', nargs='1')
-        with self.assertRaisesRegexp(error_type, error_msg):
+        with self.assertRaisesRegex(error_type, error_msg):
             group.add_argument('--foo', nargs='**')
-        with self.assertRaisesRegexp(error_type, error_msg):
+        with self.assertRaisesRegex(error_type, error_msg):
             m.add_argument('--foo', nargs='1')
 
     def test_nargs_metavar_tuple(self):
@@ -4278,11 +4278,11 @@ class TestInvalidArgumentConstructors(TestCase):
         group = parser.add_argument_group('g')
         m = parser.add_mutually_exclusive_group()
 
-        with self.assertRaisesRegexp(error_type, error_msg):
+        with self.assertRaisesRegex(error_type, error_msg):
             parser.add_argument('-w', help='w', nargs='+', metavar=('W1',))
-        with self.assertRaisesRegexp(error_type, error_msg):
+        with self.assertRaisesRegex(error_type, error_msg):
             group.add_argument('-x', help='x', nargs='*', metavar=('X1', 'X2', 'x3'))
-        with self.assertRaisesRegexp(error_type, error_msg):
+        with self.assertRaisesRegex(error_type, error_msg):
             m.add_argument('-y', help='y', nargs=3, metavar=('Y1', 'Y2'))
 
 # ================================
