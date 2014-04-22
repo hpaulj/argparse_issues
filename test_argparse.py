@@ -2571,7 +2571,7 @@ class TestMutuallyExclusiveOptionalAndPositionalWithWrap(MEMixin, TestCase):
     because positional(s) is displayed on its own line
     """
     def get_parser(self, required):
-        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser = ErrorRaisingArgumentParser(prog='PROG',formatter_class=argparse.HelpFormatter)
         group = parser.add_mutually_exclusive_group(required=required)
         group.add_argument('--foo', nargs=3, help='FOO')
         group.add_argument('--spam', nargs=4, help='SPAM')
@@ -2607,7 +2607,7 @@ class TestMutuallyExclusiveOptionalAndPositionalWithWrap(MEMixin, TestCase):
 class TestMutuallyExclusiveOptionalsMixed(MEMixin, TestCase):
 
     def get_parser(self, required):
-        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser = ErrorRaisingArgumentParser(prog='PROG',formatter_class=argparse.HelpFormatter)
         parser.add_argument('-x', action='store_true', help='x help')
         group = parser.add_mutually_exclusive_group(required=required)
         group.add_argument('-a', action='store_true', help='a help')
@@ -2689,7 +2689,7 @@ class TestMutuallyExclusiveInGroup(MEMixin, TestCase):
 class TestMutuallyExclusiveOptionalsAndPositionalsMixed(MEMixin, TestCase):
 
     def get_parser(self, required):
-        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser = ErrorRaisingArgumentParser(prog='PROG',formatter_class=argparse.HelpFormatter)
         parser.add_argument('x', help='x help')
         parser.add_argument('-y', action='store_true', help='y help')
         group = parser.add_mutually_exclusive_group(required=required)
@@ -2730,7 +2730,7 @@ class TestMutuallyExclusiveOptionalsAndPositionalsMixed(MEMixin, TestCase):
 class TestMutuallyExclusiveGroupWithExistingArguments(MEMixin, TestCase):
 
     def get_parser(self, required):
-        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser = ErrorRaisingArgumentParser(prog='PROG',formatter_class=argparse.HelpFormatter)
         a_action = parser.add_argument('-a', action='store_true', help='a help')
         b_action = parser.add_argument('-b', action='store_true', help='b help')
         c_action = parser.add_argument('-c', action='store_true', help='c help')
@@ -2772,7 +2772,8 @@ class MEPBase(object):
     def get_parser(self, required=None):
         parent = super(MEPBase, self).get_parser(required=required)
         parser = ErrorRaisingArgumentParser(
-            prog=parent.prog, add_help=False, parents=[parent])
+            prog=parent.prog, add_help=False, parents=[parent],
+            formatter_class=argparse.HelpFormatter)
         return parser
 
 
@@ -4398,7 +4399,9 @@ class TestMutuallyExclusiveGroupWithExistingArgumentsMultiGroupHelpFormatterLong
 
 class TestHelpMetavarArgumentsInnerBracketSplitLines0(HelpTestCase):
     """http://bugs.python.org/issue11874"""
-
+    """with extralong metavars (76) this was producing a blank line between
+    optionals and positionals.  This goes away with (60).  A tweak to nested
+    get_lines addresses this"""
     def custom_type(string):
         return string
 

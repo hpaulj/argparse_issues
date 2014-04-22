@@ -373,63 +373,75 @@ class HelpFormatter(object):
         return '%s%s\n\n' % (prefix, usage)
 
     def _format_actions_usage(self, actions, groups):
-        # find group indices and identify actions in groups
-        group_actions = set()
-        inserts = {}
-        for group in groups:
-            if hasattr(group, 'no_usage') and group.no_usage:
-                continue
-            try:
-                start = actions.index(group._group_actions[0])
-            except ValueError:
-                continue
-            else:
-                end = start + len(group._group_actions)
-                if actions[start:end] == group._group_actions:
-                    for action in group._group_actions:
-                        group_actions.add(action)
-                    if not group.required:
-                        if start in inserts:
-                            inserts[start] += ' ['
-                        else:
-                            inserts[start] = '['
-                        inserts[end] = ']'
-                    else:
-                        if start in inserts:
-                            inserts[start] += ' ('
-                        else:
-                            inserts[start] = '('
-                        inserts[end] = ')'
-                    for i in range(start + 1, end):
-                        inserts[i] = '|'
-
-        # collect all actions format strings
+        # format the usage using the actions list. Where possible
+        # format the groups that include those actions
+        # The actions list has priority
+        # This is a new version that formats the groups directly without
+        # needing inserts, (most) cleanup, or parsing into parts
         parts = []
-        for i, action in enumerate(actions):
+        i = 0
+        # step through the actions list
+        while i<len(actions):
+            start = end = i
+            action = actions[i]
+            group_part = None
+            for group in groups:
+                if hasattr(group, 'no_usage') and group.no_usage:
+                    continue
+                # see if the following 'n' actions are part of a group
+                if group._group_actions and action == group._group_actions[0]:
+                    end = start + len(group._group_actions)
+                    if actions[start:end] == group._group_actions:
+                        group_part = self._format_group_usage(group)
+                        if group_part:
+                            parts += group_part
+                    # could remove this group from further consideration
+                        i = end
+                    break
+            if group_part is None:
+                # this action is not part of a group, format it alone
+                part = self._format_just_actions_usage([action])
+                if part:
+                    parts += part
+                i += 1
+        return parts
 
-            # suppressed arguments are marked with None
-            # remove | separators for suppressed arguments
+    def _format_group_usage(self, group):
+        # format one group
+        actions = group._group_actions
+        parts = []
+
+        parts += '(' if group.required else '['
+        for action in actions:
+            part = self._format_just_actions_usage([action])
+            if part:
+                part = _re.sub(r'^\[(.*)\]$', r'\1', part[0]) # remove 'optional'[]
+                parts.append(part)
+                parts.append(' | ')
+        if len(parts)>1:
+            parts[-1] = ')' if group.required else ']'
+        else:
+            # nothing added
+            parts = []
+        arg_parts = [''.join(parts)]
+
+        def cleanup(text):
+            # remove unnecessary ()
+            text = _re.sub(r'^\(([^|]*)\)$', r'\1', text)
+            return text
+        arg_parts = [cleanup(t) for t in arg_parts]
+        return arg_parts
+
+    def _format_just_actions_usage(self, actions):
+        # actions, without any group markings
+        parts = []
+        for action in actions:
             if action.help is SUPPRESS:
-                parts.append(None)
-                if inserts.get(i) == '|':
-                    inserts.pop(i)
-                elif inserts.get(i + 1) == '|':
-                    inserts.pop(i + 1)
-
-            # produce all arg strings
+                pass
             elif not action.option_strings:
                 default = self._get_default_metavar_for_positional(action)
                 part = self._format_args(action, default)
-
-                # if it's in a group, strip the outer []
-                if action in group_actions:
-                    if part[0] == '[' and part[-1] == ']':
-                        part = part[1:-1]
-
-                # add the action string to the list
                 parts.append(part)
-
-            # produce the first way to invoke the option in brackets
             else:
                 option_string = action.option_strings[0]
 
@@ -445,63 +457,11 @@ class HelpFormatter(object):
                     args_string = self._format_args(action, default)
                     part = '%s %s' % (option_string, args_string)
 
-                # make it look optional if it's not required or in a group
-                if not action.required and action not in group_actions:
+                # make it look optional if it's not required
+                if not action.required:
                     part = '[%s]' % part
-
-                # add the action string to the list
                 parts.append(part)
-
-        # insert things at the necessary indices
-        for i in sorted(inserts, reverse=True):
-            parts[i:i] = [inserts[i]]
-
-        # join all the action items with spaces
-        # text = ' '.join([item for item in parts if item is not None])
-
-        # http://bugs.python.org/file30915/fix_and_unit_test_for_argparse_inner_bracket_bug.txt
-        # this splits up  groups/actions after formatting; not while
-        arg_parts = []
-        pairs = {'[': ']', '(': ')'}
-        opening_pairs = ('[', '(')
-        closing_pairs = (']', ')')
-        inner = False
-        block = []
-        opening = None
-        # Converting ['[-h]', '(', '--klmno X', '|', '--pqrst X', ')'] to
-        # ['[-h]', '(--klmno X | --pqrst X)']
-        for part in parts:
-            if part is not None:
-                if part in opening_pairs:
-                    opening = part
-                    block.append(part)
-                elif opening:
-                    if part == '|':
-                        part = ' | '
-                    block.append(part)
-                    if part in closing_pairs and part == pairs[opening]:
-                        arg_parts.append(''.join(block))
-                        block = []
-                        opening = None
-                else:
-                    arg_parts.append(part)
-
-        def cleanup(text):
-            # clean up separators for mutually exclusive groups
-            open = r'[\[(]'
-            close = r'[\])]'
-            text = _re.sub(r'(%s) ' % open, r'\1', text)
-            text = _re.sub(r' (%s)' % close, r'\1', text)
-            text = _re.sub(r'%s *%s' % (open, close), r'', text)
-            #text = _re.sub(r'\(([^|]*)\)', r'\1', text)
-            text = _re.sub(r'(?<= )\(([^|]*)\)(?=( |$))', r'\1', text) # donot remove () from metavar
-            text = _re.sub(r'^\(([^|]*)\)$', r'\1', text)
-            text = text.strip()
-            return text
-        # text = cleanup(text)
-        arg_parts = [cleanup(t) for t in arg_parts]
-        arg_parts = [t for t in arg_parts if len(t)]
-        return arg_parts
+        return parts
 
     def _format_text(self, text):
         if '%(prog)' in text:
@@ -718,23 +678,14 @@ class MultiGroupHelpFormatter(HelpFormatter):
     Only the name of this class is considered a public API. All the methods
     provided by the class are considered an implementation detail.
 
-    modify _format_usage so groups have presidence over the optionals/positionals
-    distinction.
-    It would be nice to preserve positionals order even when one or more is in a group
-    I don't think would work to have 2 positionals in a group, but not sure there
-    is logic to prevent that.
-    In theory could order groups, and non group positionals by correct positional order
-    off hand I think this is unambiguous
-    a nongroup positional could be before a one or more group positionals, but
-    placing that might be awkward; might simplest to put it in a 'dummy' group
-    'add existing' does not have the 'not-required' test that the regual add does
-    in doc could just warn user that puting positional in group(s) can lead to
-    confusing usage
-
+    This formats all the groups, even if they share actions, or the actions
+    do not occur in the other in which they were defined (in parse._actions)
+    Thus an action may appear in more than one group
+    Groups are presented in an order that preserves the order of positionals
     """
 
     def _format_usage(self, usage, actions, groups, prefix):
-        # modify this so it does not split optionals and positionals
+        #
         if prefix is None:
             prefix = _('usage: ')
 
@@ -749,31 +700,18 @@ class MultiGroupHelpFormatter(HelpFormatter):
         # if optionals and positionals are available, calculate usage
         elif usage is None:
             prog = '%(prog)s' % dict(prog=self._prog)
-
-            # split optionals from positionals
-            optionals = []
-            positionals = []
-            for action in actions:
-                if action.option_strings:
-                    optionals.append(action)
-                else:
-                    positionals.append(action)
+            optionals = [action for action in actions if action.option_strings]
+            positionals = [action for action in actions if not action.option_strings]
 
             # build full usage string
             format = self._format_actions_usage
-            action_parts = format(optionals + positionals, groups)
-            usage = ' '.join([s for s in [prog]+action_parts if s])
+            (opt_parts, pos_parts) = format(optionals + positionals, groups)
+            usage = ' '.join([s for s in [prog]+opt_parts+pos_parts if s])
+
+            # the rest is the same as in the parent formatter
             # wrap the usage parts if it's too long
             text_width = self._width - self._current_indent
             if len(prefix) + len(usage) > text_width:
-                # in this group dominated case, don't try to put positionals
-                # on a separate line
-
-                #opt_usage = usage
-                opt_parts = action_parts
-                #pos_usage = ''
-                pos_parts = []
-
                 # helper for wrapping lines
                 def get_lines(parts, indent, prefix=None):
                     lines = []
@@ -783,7 +721,7 @@ class MultiGroupHelpFormatter(HelpFormatter):
                     else:
                         line_len = len(indent) - 1
                     for part in parts:
-                        if line_len + 1 + len(part) > text_width:
+                        if line and line_len + 1 + len(part) > text_width:
                             lines.append(indent + ' '.join(line))
                             line = []
                             line_len = len(indent) - 1
@@ -827,30 +765,25 @@ class MultiGroupHelpFormatter(HelpFormatter):
         # usage will list
         # optionals that are not in a group
         # actions in groups, with possible repetitions
-        # positionals not in a group
+        # positionals that not in a group
+        # It orders groups with positionals to preserved the parsing order
 
-        # complications
-        # for long lines, caller calls this separately with optionals and positionals
-        # groups with positionals might have problems
-
-        # tests ok as default formatter except group formatting didn't work before
-        # may rotate group positionals so they are at end of list (a niceity only)
         groups = self._group_sort(actions, groups)
         group_actions = set()
         arg_parts = []
-        # format each group, without worry about order or overlap
         for group in groups:
             gactions = group._group_actions
             if not set(gactions).issubset(set(actions)):
                 # do not format this group if not all its actions are not in actions
-                # may be because it is called with just optionals or just postionals
+                # in contrast with the default formatter, order does not matter
                 continue
-            for action in gactions:
-                group_actions.add(action)
-                # can I add all actions at once?
-            group.no_usage = False
-            group_parts = super(MultiGroupHelpFormatter, self)._format_actions_usage(gactions, [group])
+            group_actions.update(gactions)
+            # group.no_usage = False
+            group_parts = self._format_group_usage(group)
+            # expect 1 element, or 0 if all suppressed
+            # or more elements if group cannot be formatted - get actions instead
             arg_parts += group_parts
+
         # now format all remaining actions
         for act in group_actions:
             actions.remove(act)
@@ -859,47 +792,43 @@ class MultiGroupHelpFormatter(HelpFormatter):
         optionals = [action for action in actions if action.option_strings]
         positionals = [action for action in actions if not action.option_strings]
 
-        group_parts = super(MultiGroupHelpFormatter, self)._format_actions_usage(optionals, [])
-        arg_parts = group_parts + arg_parts
+        parts = self._format_just_actions_usage(optionals)
+        arg_parts = parts + arg_parts
 
-        group_parts = super(MultiGroupHelpFormatter, self)._format_actions_usage(positionals, [])
-        arg_parts += group_parts
-        return arg_parts
-
+        pos_parts = self._format_just_actions_usage(positionals)
+        # keep pos_parts separate, so they can be handled separately in long lines
+        return (arg_parts, pos_parts)
 
     def _group_sort(self, actions, groups):
         # sort groups by order of positionals, if any
-        # groups = self._mutually_exclusive_groups
-        # actions = self._actions
+        from operator import itemgetter
         if len(groups)==0:
             return groups
         optionals = [action for action in actions if action.option_strings]
         positionals = [action for action in actions if not action.option_strings]
 
+        # create a sort key, based on position of action in actions
         posdex = [-1]*len(groups)
-        notingroups = set(positionals)
+        noInGroups = set(positionals)
         for i,group in enumerate(groups):
             for action in group._group_actions:
                 if action in positionals:
                     posdex[i] = positionals.index(action)
-                    notingroups.discard(action)
-        groups1 = groups[:]
-        # now make 1 element groups for each of these
-        # just a temporary copy of an existing group
+                    noInGroups.discard(action)
+        sortGroups = groups[:]
+        # actions not found in any group are put in their own tempory groups
         samplegroup = group
-        for action in notingroups:
-            #print(action.dest)
+        for action in noInGroups:
             g = _copy.copy(samplegroup)
             g.required = action.required
             g._group_actions = [action]
-            groups1.append(g)
+            sortGroups.append(g)
             posdex.append(positionals.index(action))
-        #print([[a.dest for a in g._group_actions] for g in groups1])
-        groups1 = sorted(zip(groups1,posdex), key=lambda i: i[1])
-        groups1 = [i[0] for i in groups1]
-        #print([[a.dest for a in g._group_actions] for g in groups1])
-        # self._mutually_exclusive_groups = groups1
-        return groups1
+
+        sortGroups = sorted(zip(sortGroups,posdex), key=itemgetter(1))
+        sortGroups = [i[0] for i in sortGroups]
+        return sortGroups
+
 
 # =====================
 # Options and Arguments
@@ -1811,6 +1740,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                  epilog=None,
                  parents=[],
                  formatter_class=HelpFormatter,
+                 #formatter_class=MultiGroupHelpFormatter,
                  prefix_chars='-',
                  fromfile_prefix_chars=None,
                  argument_default=None,
