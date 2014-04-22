@@ -319,13 +319,8 @@ class HelpFormatter(object):
             if len(prefix) + len(usage) > text_width:
 
                 # break usage into wrappable parts
-                part_regexp = r'\(.*?\)+|\[.*?\]+|\S+'
-                opt_usage = format(optionals, groups)
-                pos_usage = format(positionals, groups)
-                opt_parts = _re.findall(part_regexp, opt_usage)
-                pos_parts = _re.findall(part_regexp, pos_usage)
-                assert ' '.join(opt_parts) == opt_usage
-                assert ' '.join(pos_parts) == pos_usage
+                opt_parts = self._get_actions_groups_parts(optionals, groups)
+                pos_parts = self._get_actions_groups_parts(positionals, groups)
 
                 # helper for wrapping lines
                 def get_lines(parts, indent, prefix=None):
@@ -375,6 +370,31 @@ class HelpFormatter(object):
 
         # prefix with 'usage:'
         return '%s%s\n\n' % (prefix, usage)
+
+    def _get_actions_groups_parts(self, actions, groups):
+        action_group_mapping = {}
+        for group in groups:
+            try:
+                start = actions.index(group._group_actions[0])
+            except ValueError:
+                continue
+            else:
+                end = start + len(group._group_actions)
+                if actions[start:end] == group._group_actions:
+                    action_group_mapping[group._group_actions[0]] = group
+
+        parts = []
+        last_group_actions = []
+        for action in actions:
+            if action in action_group_mapping:
+                group = action_group_mapping[action]
+                parts.append(self._format_actions_usage(group._group_actions,
+                    [group]))
+                last_group_actions = group._group_actions
+            elif action not in last_group_actions:
+                parts.append(self._format_actions_usage([action], []))
+
+        return parts
 
     def _format_actions_usage(self, actions, groups):
         # find group indices and identify actions in groups
