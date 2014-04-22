@@ -4820,6 +4820,46 @@ class TestHelpMetavarTypeFormatter(HelpTestCase):
     version = ''
 
 
+class TestHelpMetavarArgumentsInnerBracketSplitLines(HelpTestCase):
+    """"""
+
+    def custom_type(string):
+        return string
+
+    parser_signature = Sig(prog='PROG')
+    long_a = 'a' * 60
+    long_d = 'd' * 60
+    argument_signatures = [Sig('--a', metavar=long_a),
+                           Sig('--b', metavar='[innerpart]outerpart'),
+                           Sig('--c'),
+                           Sig('d', metavar=long_d),
+                           Sig('e', metavar='[innerpart2]outerpart2'),
+                           Sig('f'),
+                           ]
+    argument_group_signatures = []
+    usage = '''\
+       usage: PROG [-h]
+                   [--a {0}]
+                   [--b [innerpart]outerpart] [--c C]
+                   {1}
+                   [innerpart2]outerpart2 f
+       '''.format(long_a, long_d)
+    help = usage + '''\
+
+       positional arguments:
+         {0}
+         [innerpart2]outerpart2
+         f
+
+       optional arguments:
+         -h, --help            show this help message and exit
+         --a {1}
+         --b [innerpart]outerpart
+         --c C
+       '''.format(long_d, long_a)
+    version = ''
+
+
 # =====================================
 # Optional/Positional constructor tests
 # =====================================
