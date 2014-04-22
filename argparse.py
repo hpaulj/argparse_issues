@@ -1339,9 +1339,11 @@ class _ActionsContainer(object):
         self._action_groups.append(group)
         return group
 
-    def add_mutually_exclusive_group(self, **kwargs):
+    def add_mutually_exclusive_group(self, *args, **kwargs):
         group = _MutuallyExclusiveGroup(self, **kwargs)
         self._mutually_exclusive_groups.append(group)
+        for action in args:
+            group._group_actions.append(action)
         return group
 
     def _add_action(self, action):

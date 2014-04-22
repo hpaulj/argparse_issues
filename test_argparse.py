@@ -2689,6 +2689,42 @@ class TestMutuallyExclusiveOptionalsAndPositionalsMixed(MEMixin, TestCase):
           -c          c help
         '''
 
+class TestMutuallyExclusiveGroupWithExistingArguments(MEMixin, TestCase):
+
+    def get_parser(self, required):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        a_action = parser.add_argument('-a', action='store_true', help='a help')
+        b_action = parser.add_argument('-b', action='store_true', help='b help')
+        c_action = parser.add_argument('-c', action='store_true', help='c help')
+        d_action = parser.add_argument('-d', action='store_true', help='d help')
+        parser.add_mutually_exclusive_group(a_action, c_action, required=required)
+        parser.add_mutually_exclusive_group(a_action, d_action, required=required)
+        return parser
+
+    failures = ['-a -c', '-a -d', '-a -c -d', '-a -b -c', '-a -b -d', '-a -b -c -d']
+    successes = [
+        ('-a -b', NS(a=True, b=True, c=False, d=False)),
+        ('-c -d', NS(a=False, b=False, c=True, d=True)),
+        ('-c -b -d', NS(a=False, b=True, c=True, d=True)),
+    ]
+    successes_when_not_required = [
+        ('', NS(a=False, b=False, c=False, d=False)),
+        ('-b', NS(a=False, b=True, c=False, d=False)),
+    ]
+
+    usage_when_required = usage_when_not_required = '''\
+        usage: PROG [-h] [-a] [-b] [-c] [-d]
+        '''
+    help = '''\
+
+        optional arguments:
+          -h, --help  show this help message and exit
+          -a          a help
+          -b          b help
+          -c          c help
+          -d          d help
+        '''
+
 # =================================================
 # Mutually exclusive group in parent parser tests
 # =================================================

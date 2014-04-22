@@ -1728,6 +1728,28 @@ Mutual exclusion
      usage: PROG [-h] (--foo | --bar)
      PROG: error: one of the arguments --foo --bar is required
 
+   Finally, you can also add existing arguments to a mutually exclusive
+   group. This allows you to include arguments in more than one mutually
+   exclusive group::
+
+     >>> import argparse
+     >>> parser = argparse.ArgumentParser(prog='PROG')
+     >>> foo_arg = parser.add_argument('--foo', action='store_true')
+     >>> bar_arg = parser.add_argument('--bar', action='store_false')
+     >>> baz_arg = parser.add_argument('--baz', action='store_true')
+     >>> group = parser.add_mutually_exclusive_group(foo_arg, bar_arg, required=True)
+     >>> group = parser.add_mutually_exclusive_group(foo_arg, baz_arg, required=True)
+     >>> parser.parse_args(["--bar", "--baz"])
+     Namespace(bar=False, baz=True, foo=False)
+     >>> parser.parse_args(["--foo"])
+     Namespace(bar=False, baz=False, foo=True)
+     >>> parser.parse_args(["--foo", "--bar"])
+     usage: PROG [-h] (--foo | --bar) [--baz]
+     PROG: error: argument --bar: not allowed with argument --foo
+     >>> parser.parse_args(["--foo", "--baz"])
+     usage: PROG [-h] (--foo | --bar) [--baz]
+     PROG: error: argument --baz: not allowed with argument --foo
+
    Note that currently mutually exclusive argument groups do not support the
    *title* and *description* arguments of
    :meth:`~ArgumentParser.add_argument_group`.
