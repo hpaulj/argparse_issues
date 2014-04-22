@@ -311,16 +311,15 @@ class HelpFormatter(object):
 
             # build full usage string
             format = self._format_actions_usage
-            action_usage = format(optionals + positionals, groups)
-            usage = ' '.join([s for s in [prog, action_usage] if s])
+            action_parts = format(optionals + positionals, groups)
+            usage = ' '.join([s for s in [prog]+action_parts if s])
 
             # wrap the usage parts if it's too long
             text_width = self._width - self._current_indent
             if len(prefix) + len(usage) > text_width:
 
-                # break usage into wrappable parts
-                opt_parts = self._get_actions_groups_parts(optionals, groups)
-                pos_parts = self._get_actions_groups_parts(positionals, groups)
+                opt_parts = format(optionals, groups)
+                pos_parts = format(positionals, groups)
 
                 # helper for wrapping lines
                 def get_lines(parts, indent, prefix=None):
@@ -331,7 +330,7 @@ class HelpFormatter(object):
                     else:
                         line_len = len(indent) - 1
                     for part in parts:
-                        if line_len + 1 + len(part) > text_width:
+                        if line and line_len + 1 + len(part) > text_width:
                             lines.append(indent + ' '.join(line))
                             line = []
                             line_len = len(indent) - 1
@@ -371,87 +370,76 @@ class HelpFormatter(object):
         # prefix with 'usage:'
         return '%s%s\n\n' % (prefix, usage)
 
-    def _get_actions_groups_parts(self, actions, groups):
-        action_group_mapping = {}
-        for group in groups:
-            try:
-                start = actions.index(group._group_actions[0])
-            except ValueError:
-                continue
-            else:
-                end = start + len(group._group_actions)
-                if actions[start:end] == group._group_actions:
-                    action_group_mapping[group._group_actions[0]] = group
-
+    def _format_actions_usage(self, actions, groups):
+        # format the usage using the actions list. Where possible
+        # format the groups that include those actions
+        # The actions list has priority
+        # This is a new version that formats the groups directly without
+        # needing inserts, (most) cleanup, or parsing into parts
         parts = []
-        last_group_actions = []
-        for action in actions:
-            if action in action_group_mapping:
-                group = action_group_mapping[action]
-                parts.append(self._format_actions_usage(group._group_actions,
-                    [group]))
-                last_group_actions = group._group_actions
-            elif action not in last_group_actions:
-                parts.append(self._format_actions_usage([action], []))
-
+        i = 0
+        # step through the actions list
+        while i<len(actions):
+            start = end = i
+            action = actions[i]
+            group_part = None
+            for group in groups:
+                if hasattr(group, 'no_usage') and group.no_usage:
+                    continue
+                # see if the following 'n' actions are part of a group
+                if group._group_actions and action == group._group_actions[0]:
+                    end = start + len(group._group_actions)
+                    if actions[start:end] == group._group_actions:
+                        group_part = self._format_group_usage(group)
+                        if group_part:
+                            parts += group_part
+                    # could remove this group from further consideration
+                        i = end
+                    break
+            if group_part is None:
+                # this action is not part of a group, format it alone
+                part = self._format_just_actions_usage([action])
+                if part:
+                    parts += part
+                i += 1
         return parts
 
-    def _format_actions_usage(self, actions, groups):
-        # find group indices and identify actions in groups
-        group_actions = set()
-        inserts = {}
-        for group in groups:
-            try:
-                start = actions.index(group._group_actions[0])
-            except ValueError:
-                continue
-            else:
-                end = start + len(group._group_actions)
-                if actions[start:end] == group._group_actions:
-                    for action in group._group_actions:
-                        group_actions.add(action)
-                    if not group.required:
-                        if start in inserts:
-                            inserts[start] += ' ['
-                        else:
-                            inserts[start] = '['
-                        inserts[end] = ']'
-                    else:
-                        if start in inserts:
-                            inserts[start] += ' ('
-                        else:
-                            inserts[start] = '('
-                        inserts[end] = ')'
-                    for i in range(start + 1, end):
-                        inserts[i] = '|'
-
-        # collect all actions format strings
+    def _format_group_usage(self, group):
+        # format one group
+        actions = group._group_actions
         parts = []
-        for i, action in enumerate(actions):
 
-            # suppressed arguments are marked with None
-            # remove | separators for suppressed arguments
+        parts += '(' if group.required else '['
+        for action in actions:
+            part = self._format_just_actions_usage([action])
+            if part:
+                part = _re.sub(r'^\[(.*)\]$', r'\1', part[0]) # remove 'optional'[]
+                parts.append(part)
+                parts.append(' | ')
+        if len(parts)>1:
+            parts[-1] = ')' if group.required else ']'
+        else:
+            # nothing added
+            parts = []
+        arg_parts = [''.join(parts)]
+
+        def cleanup(text):
+            # remove unnecessary ()
+            text = _re.sub(r'^\(([^|]*)\)$', r'\1', text)
+            return text
+        arg_parts = [cleanup(t) for t in arg_parts]
+        return arg_parts
+
+    def _format_just_actions_usage(self, actions):
+        # actions, without any group markings
+        parts = []
+        for action in actions:
             if action.help is SUPPRESS:
-                parts.append(None)
-                if inserts.get(i) == '|':
-                    inserts.pop(i)
-                elif inserts.get(i + 1) == '|':
-                    inserts.pop(i + 1)
-
-            # produce all arg strings
+                pass
             elif not action.option_strings:
                 default = self._get_default_metavar_for_positional(action)
                 part = self._format_args(action, default)
-
-                # if it's in a group, strip the outer []
-                if action in group_actions:
-                    if part[0] == '[' and part[-1] == ']':
-                        part = part[1:-1]
-
-                # add the action string to the list
                 parts.append(part)
-
-            # produce the first way to invoke the option in brackets
             else:
                 option_string = action.option_strings[0]
 
@@ -467,31 +455,11 @@ class HelpFormatter(object):
                     args_string = self._format_args(action, default)
                     part = '%s %s' % (option_string, args_string)
 
-                # make it look optional if it's not required or in a group
-                if not action.required and action not in group_actions:
+                # make it look optional if it's not required
+                if not action.required:
                     part = '[%s]' % part
-
-                # add the action string to the list
                 parts.append(part)
-
-        # insert things at the necessary indices
-        for i in sorted(inserts, reverse=True):
-            parts[i:i] = [inserts[i]]
-
-        # join all the action items with spaces
-        text = ' '.join([item for item in parts if item is not None])
-
-        # clean up separators for mutually exclusive groups
-        open = r'[\[(]'
-        close = r'[\])]'
-        text = _re.sub(r'(%s) ' % open, r'\1', text)
-        text = _re.sub(r' (%s)' % close, r'\1', text)
-        text = _re.sub(r'%s *%s' % (open, close), r'', text)
-        text = _re.sub(r'\(([^|]*)\)', r'\1', text)
-        text = text.strip()
-
-        # return the text
-        return text
+        return parts
 
     def _format_text(self, text):
         if '%(prog)' in text:
