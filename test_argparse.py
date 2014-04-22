@@ -2566,6 +2566,44 @@ class TestMutuallyExclusiveOptionalAndPositional(MEMixin, TestCase):
         '''
 
 
+class TestMutuallyExclusiveOptionalAndPositionalWithWrap(MEMixin, TestCase):
+    """When wrapped, groups that include a positional cannot be displayed
+    because positional(s) is displayed on its own line
+    """
+    def get_parser(self, required):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        group = parser.add_mutually_exclusive_group(required=required)
+        group.add_argument('--foo', nargs=3, help='FOO')
+        group.add_argument('--spam', nargs=4, help='SPAM')
+        group.add_argument('badger', nargs='*', default='X', help='BADGER')
+        return parser
+
+    failures = []
+    successes = []
+    successes_when_not_required = []
+
+    usage_when_not_required = '''\
+        usage: PROG [-h] [--foo FOO FOO FOO] [--spam SPAM SPAM SPAM SPAM]
+                    [badger [badger ...]]
+        '''
+    usage_when_required = '''\
+        usage: PROG [-h] [--foo FOO FOO FOO] [--spam SPAM SPAM SPAM SPAM]
+                    [badger [badger ...]]
+        '''
+    help = '''\
+
+        positional arguments:
+          badger                BADGER
+
+        optional arguments:
+          -h, --help            show this help message and exit
+          --foo FOO FOO FOO     FOO
+          --spam SPAM SPAM SPAM SPAM
+                                SPAM
+        '''
+
+
+
 class TestMutuallyExclusiveOptionalsMixed(MEMixin, TestCase):
 
     def get_parser(self, required):
@@ -4153,6 +4191,283 @@ class TestHelpMetavarTypeFormatter(HelpTestCase):
         '''
     version = ''
 
+# =====================================
+#  MultiGroupHelpFormatter tests
+# =====================================
+
+class TestMutuallyExclusiveOptionalsMixedMultiGroupHelpFormatter(MEMixin, TestCase):
+
+    def get_parser(self, required):
+        parser = ErrorRaisingArgumentParser(prog='PROG',
+            formatter_class=argparse.MultiGroupHelpFormatter)
+        parser.add_argument('-x', action='store_true', help='x help')
+        group = parser.add_mutually_exclusive_group(required=required)
+        group.add_argument('-a', action='store_true', help='a help')
+        group.add_argument('-b', action='store_true', help='b help')
+        parser.add_argument('-y', action='store_true', help='y help')
+        group.add_argument('-c', action='store_true', help='c help')
+        return parser
+
+    failures = []
+    successes = []
+    successes_when_not_required = []
+
+    usage_when_required = '''\
+        usage: PROG [-h] [-x] [-y] (-a | -b | -c)
+        '''
+    usage_when_not_required = '''\
+        usage: PROG [-h] [-x] [-y] [-a | -b | -c]
+        '''
+    help = '''\
+
+        optional arguments:
+          -h, --help  show this help message and exit
+          -x          x help
+          -a          a help
+          -b          b help
+          -y          y help
+          -c          c help
+        '''
+
+
+class TestMutuallyExclusiveOptionalsAndPositionalsMixedMultiGroupHelpFormatter(MEMixin, TestCase):
+
+    def get_parser(self, required):
+        parser = ErrorRaisingArgumentParser(prog='PROG',
+            formatter_class=argparse.MultiGroupHelpFormatter)
+        parser.add_argument('x', help='x help')
+        parser.add_argument('-y', action='store_true', help='y help')
+        group = parser.add_mutually_exclusive_group(required=required)
+        group.add_argument('a', nargs='?', help='a help')
+        group.add_argument('-b', action='store_true', help='b help')
+        group.add_argument('-c', action='store_true', help='c help')
+        return parser
+
+    failures = []
+    successes = []
+    successes_when_not_required = []
+
+    usage_when_required = '''\
+        usage: PROG [-h] [-y] x (a | -b | -c)
+        '''
+    usage_when_not_required = '''\
+        usage: PROG [-h] [-y] x [a | -b | -c]
+        '''
+    help = '''\
+
+        positional arguments:
+          x           x help
+          a           a help
+
+        optional arguments:
+          -h, --help  show this help message and exit
+          -y          y help
+          -b          b help
+          -c          c help
+        '''
+
+class TestMutuallyExclusiveGroupWithExistingArgumentsMultiGroupHelpFormatter(MEMixin, TestCase):
+
+    def get_parser(self, required):
+        parser = ErrorRaisingArgumentParser(prog='PROG',
+            formatter_class=argparse.MultiGroupHelpFormatter)
+        a_action = parser.add_argument('-a', action='store_true', help='a help')
+        b_action = parser.add_argument('-b', action='store_true', help='b help')
+        c_action = parser.add_argument('-c', action='store_true', help='c help')
+        d_action = parser.add_argument('-d', action='store_true', help='d help')
+        parser.add_mutually_exclusive_group(a_action, c_action, required=required)
+        parser.add_mutually_exclusive_group(a_action, d_action, required=required)
+        return parser
+
+    failures = []
+    successes = []
+    successes_when_not_required = []
+
+    usage_when_required = '''\
+        usage: PROG [-h] [-b] (-a | -c) (-a | -d)
+        '''
+    usage_when_not_required = '''\
+        usage: PROG [-h] [-b] [-a | -c] [-a | -d]
+        '''
+    help = '''\
+
+        optional arguments:
+          -h, --help  show this help message and exit
+          -a          a help
+          -b          b help
+          -c          c help
+          -d          d help
+        '''
+
+class TestMutuallyExclusiveGroupWithExistingArgumentsMultiGroupHelpFormatterLong(MEMixin, TestCase):
+    """long enough to wrap the usage"""
+    maxDiff = None
+    def get_parser(self, required):
+        parser = ErrorRaisingArgumentParser(prog='PROG',
+            formatter_class=argparse.MultiGroupHelpFormatter)
+        a_action = parser.add_argument('-a', help='a help')
+        b_action = parser.add_argument('-b', help='b help')
+        c_action = parser.add_argument('-c', help='c help')
+        d_action = parser.add_argument('-d', help='d help')
+        parser.add_mutually_exclusive_group(a_action, c_action, required=required)
+        parser.add_mutually_exclusive_group(a_action, d_action, required=required)
+        parser.add_mutually_exclusive_group(a_action, b_action, required=required)
+        parser.add_mutually_exclusive_group(b_action, d_action, required=required)
+        parser.add_mutually_exclusive_group(b_action, c_action, required=required)
+        parser.add_mutually_exclusive_group(d_action, c_action, required=required)
+        parser.add_argument('x', help='x help')
+        return parser
+
+    failures = []
+    successes = []
+    successes_when_not_required = []
+
+    usage_when_required = '''\
+        usage: PROG [-h] (-a A | -c C) (-a A | -d D) (-a A | -b B) (-b B | -d D)
+                    (-b B | -c C) (-d D | -c C) x
+        '''
+    usage_when_not_required = '''\
+        usage: PROG [-h] [-a A | -c C] [-a A | -d D] [-a A | -b B] [-b B | -d D]
+                    [-b B | -c C] [-d D | -c C] x
+        '''
+    help = '''\
+
+        positional arguments:
+          x           x help
+
+        optional arguments:
+          -h, --help  show this help message and exit
+          -a A        a help
+          -b B        b help
+          -c C        c help
+          -d D        d help
+        '''
+
+class TestMutuallyExclusiveGroupWithExistingArgumentsMultiGroupHelpFormatterLong1(MEMixin, TestCase):
+    """long enough to wrap the usage; positional in group
+    A group with a positional is not show when usage is wrapped
+    the positionals are on their own line(s)
+    This is true even if arguments are added to the groups normally
+    """
+    maxDiff = None
+    def get_parser(self, required):
+        parser = ErrorRaisingArgumentParser(prog='PROG',
+            formatter_class=argparse.MultiGroupHelpFormatter)
+        a_action = parser.add_argument('-a', help='a help')
+        b_action = parser.add_argument('-b', help='b help')
+        c_action = parser.add_argument('-c', help='c help')
+        d_action = parser.add_argument('-d', help='d help')
+        x_action = parser.add_argument('x', nargs='?', help='x help')
+        foo_action = parser.add_argument('foo', help='foo help')
+        y_action = parser.add_argument('y', nargs='?', help='y help')
+        parser.add_mutually_exclusive_group(a_action, c_action, required=required)
+        parser.add_mutually_exclusive_group(a_action, d_action, required=required)
+        parser.add_mutually_exclusive_group(a_action, b_action, required=required)
+        parser.add_mutually_exclusive_group(b_action, d_action, required=required)
+        parser.add_mutually_exclusive_group(b_action, y_action, required=required)
+        parser.add_mutually_exclusive_group(d_action, x_action, required=required)
+        return parser
+
+    failures = []
+    successes = []
+    successes_when_not_required = []
+
+    usage_when_required = '''\
+        usage: PROG [-h] (-a A | -c C) (-a A | -d D) (-a A | -b B) (-b B | -d D)
+                    (-d D | x) foo (-b B | y)
+        '''
+
+    usage_when_not_required = '''\
+        usage: PROG [-h] [-a A | -c C] [-a A | -d D] [-a A | -b B] [-b B | -d D]
+                    [-d D | x] foo [-b B | y]
+        '''
+    help = '''\
+
+        positional arguments:
+          x           x help
+          foo         foo help
+          y           y help
+
+        optional arguments:
+          -h, --help  show this help message and exit
+          -a A        a help
+          -b B        b help
+          -c C        c help
+          -d D        d help
+        '''
+
+class TestHelpMetavarArgumentsInnerBracketSplitLines0(HelpTestCase):
+    """http://bugs.python.org/issue11874"""
+
+    def custom_type(string):
+        return string
+
+    parser_signature = Sig(prog='PROG',
+            formatter_class=argparse.MultiGroupHelpFormatter)
+    argument_signatures = [Sig('--a', metavar='a' * 76),
+                           Sig('--b', metavar='range(20)'),
+                           Sig('c', metavar='c' * 76),
+                           Sig('d', nargs='*'),
+                           ]
+    argument_group_signatures = []
+    usage = '''\
+       usage: PROG [-h]
+                   [--a {0}]
+                   [--b range(20)]
+                   {1}
+                   [d [d ...]]
+       '''.format('a' * 76, 'c' * 76)
+    help = usage + '''\
+
+       positional arguments:
+         {0}
+         d
+
+       optional arguments:
+         -h, --help            show this help message and exit
+         --a {1}
+         --b range(20)
+       '''.format('c' * 76, 'a' * 76)
+    version = ''
+
+class TestHelpMetavarArgumentsInnerBracketSplitLines(HelpTestCase):
+    """"""
+
+    def custom_type(string):
+        return string
+
+    parser_signature = Sig(prog='PROG')
+    long_a = 'a' * 60
+    long_d = 'd' * 60
+    argument_signatures = [Sig('--a', metavar=long_a),
+                           Sig('--b', metavar='[innerpart]outerpart'),
+                           Sig('--c'),
+                           Sig('d', metavar=long_d),
+                           Sig('e', metavar='[innerpart2]outerpart2'),
+                           Sig('f'),
+                           ]
+    argument_group_signatures = []
+    usage = '''\
+       usage: PROG [-h]
+                   [--a {0}]
+                   [--b [innerpart]outerpart] [--c C]
+                   {1}
+                   [innerpart2]outerpart2 f
+       '''.format(long_a, long_d)
+    help = usage + '''\
+
+       positional arguments:
+         {0}
+         [innerpart2]outerpart2
+         f
+
+       optional arguments:
+         -h, --help            show this help message and exit
+         --a {1}
+         --b [innerpart]outerpart
+         --c C
+       '''.format(long_d, long_a)
+    version = ''
 
 # =====================================
 # Optional/Positional constructor tests

@@ -72,6 +72,7 @@ __all__ = [
     'RawDescriptionHelpFormatter',
     'RawTextHelpFormatter',
     'MetavarTypeHelpFormatter',
+    'MultiGroupHelpFormatter',
     'Namespace',
     'Action',
     'ONE_OR_MORE',
@@ -311,21 +312,16 @@ class HelpFormatter(object):
 
             # build full usage string
             format = self._format_actions_usage
-            action_usage = format(optionals + positionals, groups)
-            usage = ' '.join([s for s in [prog, action_usage] if s])
+            action_parts = format(optionals + positionals, groups)
+            usage = ' '.join([s for s in [prog]+action_parts if s])
 
             # wrap the usage parts if it's too long
             text_width = self._width - self._current_indent
             if len(prefix) + len(usage) > text_width:
 
                 # break usage into wrappable parts
-                part_regexp = r'\(.*?\)+|\[.*?\]+|\S+'
-                opt_usage = format(optionals, groups)
-                pos_usage = format(positionals, groups)
-                opt_parts = _re.findall(part_regexp, opt_usage)
-                pos_parts = _re.findall(part_regexp, pos_usage)
-                assert ' '.join(opt_parts) == opt_usage
-                assert ' '.join(pos_parts) == pos_usage
+                opt_parts = format(optionals, groups)
+                pos_parts = format(positionals, groups)
 
                 # helper for wrapping lines
                 def get_lines(parts, indent, prefix=None):
@@ -381,6 +377,8 @@ class HelpFormatter(object):
         group_actions = set()
         inserts = {}
         for group in groups:
+            if hasattr(group, 'no_usage') and group.no_usage:
+                continue
             try:
                 start = actions.index(group._group_actions[0])
             except ValueError:
@@ -459,19 +457,51 @@ class HelpFormatter(object):
             parts[i:i] = [inserts[i]]
 
         # join all the action items with spaces
-        text = ' '.join([item for item in parts if item is not None])
+        # text = ' '.join([item for item in parts if item is not None])
 
-        # clean up separators for mutually exclusive groups
-        open = r'[\[(]'
-        close = r'[\])]'
-        text = _re.sub(r'(%s) ' % open, r'\1', text)
-        text = _re.sub(r' (%s)' % close, r'\1', text)
-        text = _re.sub(r'%s *%s' % (open, close), r'', text)
-        text = _re.sub(r'\(([^|]*)\)', r'\1', text)
-        text = text.strip()
+        # http://bugs.python.org/file30915/fix_and_unit_test_for_argparse_inner_bracket_bug.txt
+        # this splits up  groups/actions after formatting; not while
+        arg_parts = []
+        pairs = {'[': ']', '(': ')'}
+        opening_pairs = ('[', '(')
+        closing_pairs = (']', ')')
+        inner = False
+        block = []
+        opening = None
+        # Converting ['[-h]', '(', '--klmno X', '|', '--pqrst X', ')'] to
+        # ['[-h]', '(--klmno X | --pqrst X)']
+        for part in parts:
+            if part is not None:
+                if part in opening_pairs:
+                    opening = part
+                    block.append(part)
+                elif opening:
+                    if part == '|':
+                        part = ' | '
+                    block.append(part)
+                    if part in closing_pairs and part == pairs[opening]:
+                        arg_parts.append(''.join(block))
+                        block = []
+                        opening = None
+                else:
+                    arg_parts.append(part)
 
-        # return the text
-        return text
+        def cleanup(text):
+            # clean up separators for mutually exclusive groups
+            open = r'[\[(]'
+            close = r'[\])]'
+            text = _re.sub(r'(%s) ' % open, r'\1', text)
+            text = _re.sub(r' (%s)' % close, r'\1', text)
+            text = _re.sub(r'%s *%s' % (open, close), r'', text)
+            #text = _re.sub(r'\(([^|]*)\)', r'\1', text)
+            text = _re.sub(r'(?<= )\(([^|]*)\)(?=( |$))', r'\1', text) # donot remove () from metavar
+            text = _re.sub(r'^\(([^|]*)\)$', r'\1', text)
+            text = text.strip()
+            return text
+        # text = cleanup(text)
+        arg_parts = [cleanup(t) for t in arg_parts]
+        arg_parts = [t for t in arg_parts if len(t)]
+        return arg_parts
 
     def _format_text(self, text):
         if '%(prog)' in text:
@@ -681,7 +711,195 @@ class MetavarTypeHelpFormatter(HelpFormatter):
     def _get_default_metavar_for_positional(self, action):
         return action.type.__name__
 
+class MultiGroupHelpFormatter(HelpFormatter):
+    """Help message formatter that handles overlapping mutually exclusive
+    groups.
 
+    Only the name of this class is considered a public API. All the methods
+    provided by the class are considered an implementation detail.
+
+    modify _format_usage so groups have presidence over the optionals/positionals
+    distinction.
+    It would be nice to preserve positionals order even when one or more is in a group
+    I don't think would work to have 2 positionals in a group, but not sure there
+    is logic to prevent that.
+    In theory could order groups, and non group positionals by correct positional order
+    off hand I think this is unambiguous
+    a nongroup positional could be before a one or more group positionals, but
+    placing that might be awkward; might simplest to put it in a 'dummy' group
+    'add existing' does not have the 'not-required' test that the regual add does
+    in doc could just warn user that puting positional in group(s) can lead to
+    confusing usage
+
+    """
+
+    def _format_usage(self, usage, actions, groups, prefix):
+        # modify this so it does not split optionals and positionals
+        if prefix is None:
+            prefix = _('usage: ')
+
+        # if usage is specified, use that
+        if usage is not None:
+            usage = usage % dict(prog=self._prog)
+
+        # if no optionals or positionals are available, usage is just prog
+        elif usage is None and not actions:
+            usage = '%(prog)s' % dict(prog=self._prog)
+
+        # if optionals and positionals are available, calculate usage
+        elif usage is None:
+            prog = '%(prog)s' % dict(prog=self._prog)
+
+            # split optionals from positionals
+            optionals = []
+            positionals = []
+            for action in actions:
+                if action.option_strings:
+                    optionals.append(action)
+                else:
+                    positionals.append(action)
+
+            # build full usage string
+            format = self._format_actions_usage
+            action_parts = format(optionals + positionals, groups)
+            usage = ' '.join([s for s in [prog]+action_parts if s])
+            # wrap the usage parts if it's too long
+            text_width = self._width - self._current_indent
+            if len(prefix) + len(usage) > text_width:
+                # in this group dominated case, don't try to put positionals
+                # on a separate line
+
+                #opt_usage = usage
+                opt_parts = action_parts
+                #pos_usage = ''
+                pos_parts = []
+
+                # helper for wrapping lines
+                def get_lines(parts, indent, prefix=None):
+                    lines = []
+                    line = []
+                    if prefix is not None:
+                        line_len = len(prefix) - 1
+                    else:
+                        line_len = len(indent) - 1
+                    for part in parts:
+                        if line_len + 1 + len(part) > text_width:
+                            lines.append(indent + ' '.join(line))
+                            line = []
+                            line_len = len(indent) - 1
+                        line.append(part)
+                        line_len += len(part) + 1
+                    if line:
+                        lines.append(indent + ' '.join(line))
+                    if prefix is not None:
+                        lines[0] = lines[0][len(indent):]
+                    return lines
+
+                # if prog is short, follow it with optionals or positionals
+                if len(prefix) + len(prog) <= 0.75 * text_width:
+                    indent = ' ' * (len(prefix) + len(prog) + 1)
+                    if opt_parts:
+                        lines = get_lines([prog] + opt_parts, indent, prefix)
+                        lines.extend(get_lines(pos_parts, indent))
+                    elif pos_parts:
+                        lines = get_lines([prog] + pos_parts, indent, prefix)
+                    else:
+                        lines = [prog]
+
+                # if prog is long, put it on its own line
+                else:
+                    indent = ' ' * len(prefix)
+                    parts = opt_parts + pos_parts
+                    lines = get_lines(parts, indent)
+                    if len(lines) > 1:
+                        lines = []
+                        lines.extend(get_lines(opt_parts, indent))
+                        lines.extend(get_lines(pos_parts, indent))
+                    lines = [prog] + lines
+
+                # join lines into usage
+                usage = '\n'.join(lines)
+
+        # prefix with 'usage:'
+        return '%s%s\n\n' % (prefix, usage)
+
+    def _format_actions_usage(self, actions, groups):
+        # usage will list
+        # optionals that are not in a group
+        # actions in groups, with possible repetitions
+        # positionals not in a group
+
+        # complications
+        # for long lines, caller calls this separately with optionals and positionals
+        # groups with positionals might have problems
+
+        # tests ok as default formatter except group formatting didn't work before
+        # may rotate group positionals so they are at end of list (a niceity only)
+        groups = self._group_sort(actions, groups)
+        group_actions = set()
+        arg_parts = []
+        # format each group, without worry about order or overlap
+        for group in groups:
+            gactions = group._group_actions
+            if not set(gactions).issubset(set(actions)):
+                # do not format this group if not all its actions are not in actions
+                # may be because it is called with just optionals or just postionals
+                continue
+            for action in gactions:
+                group_actions.add(action)
+                # can I add all actions at once?
+            group.no_usage = False
+            group_parts = super(MultiGroupHelpFormatter, self)._format_actions_usage(gactions, [group])
+            arg_parts += group_parts
+        # now format all remaining actions
+        for act in group_actions:
+            actions.remove(act)
+        # find optionals and positionals in the remaining actions list
+        # i.e. ones that are not in any group
+        optionals = [action for action in actions if action.option_strings]
+        positionals = [action for action in actions if not action.option_strings]
+
+        group_parts = super(MultiGroupHelpFormatter, self)._format_actions_usage(optionals, [])
+        arg_parts = group_parts + arg_parts
+
+        group_parts = super(MultiGroupHelpFormatter, self)._format_actions_usage(positionals, [])
+        arg_parts += group_parts
+        return arg_parts
+
+
+    def _group_sort(self, actions, groups):
+        # sort groups by order of positionals, if any
+        # groups = self._mutually_exclusive_groups
+        # actions = self._actions
+        if len(groups)==0:
+            return groups
+        optionals = [action for action in actions if action.option_strings]
+        positionals = [action for action in actions if not action.option_strings]
+
+        posdex = [-1]*len(groups)
+        notingroups = set(positionals)
+        for i,group in enumerate(groups):
+            for action in group._group_actions:
+                if action in positionals:
+                    posdex[i] = positionals.index(action)
+                    notingroups.discard(action)
+        groups1 = groups[:]
+        # now make 1 element groups for each of these
+        # just a temporary copy of an existing group
+        samplegroup = group
+        for action in notingroups:
+            #print(action.dest)
+            g = _copy.copy(samplegroup)
+            g.required = action.required
+            g._group_actions = [action]
+            groups1.append(g)
+            posdex.append(positionals.index(action))
+        #print([[a.dest for a in g._group_actions] for g in groups1])
+        groups1 = sorted(zip(groups1,posdex), key=lambda i: i[1])
+        groups1 = [i[0] for i in groups1]
+        #print([[a.dest for a in g._group_actions] for g in groups1])
+        # self._mutually_exclusive_groups = groups1
+        return groups1
 
 # =====================
 # Options and Arguments
@@ -1344,6 +1562,7 @@ class _ActionsContainer(object):
         self._mutually_exclusive_groups.append(group)
         for action in args:
             group._group_actions.append(action)
+            group.no_usage = True
         return group
 
     def _add_action(self, action):
