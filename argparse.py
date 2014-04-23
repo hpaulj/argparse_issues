@@ -311,8 +311,8 @@ class HelpFormatter(object):
 
             # build full usage string
             format = self._format_actions_usage
-            action_parts = format(optionals + positionals, groups)
-            usage = ' '.join([s for s in [prog]+action_parts if s])
+            all_parts = format(optionals + positionals, groups)
+            usage = ' '.join([prog]+all_parts)
 
             # wrap the usage parts if it's too long
             text_width = self._width - self._current_indent
@@ -364,7 +364,6 @@ class HelpFormatter(object):
                         lines.extend(get_lines(pos_parts, indent))
                     lines = [prog] + lines
 
-                # join lines into usage
                 usage = '\n'.join(lines)
 
         # prefix with 'usage:'
@@ -393,7 +392,7 @@ class HelpFormatter(object):
                         group_part = self._format_group_usage(group)
                         if group_part:
                             parts += group_part
-                    # could remove this group from further consideration
+                        # could remove this group from further consideration
                         i = end
                     break
             if group_part is None:
@@ -402,6 +401,7 @@ class HelpFormatter(object):
                 if part:
                     parts += part
                 i += 1
+        parts = [p for p in parts if p] # remove '' parts
         return parts
 
     def _format_group_usage(self, group):

@@ -4119,7 +4119,9 @@ class TestHelpMetavarTypeFormatter(HelpTestCase):
 
 
 class TestHelpMetavarArgumentsInnerBracketSplitLines(HelpTestCase):
-    """"""
+    """
+    issue11874
+    """
 
     def custom_type(string):
         return string
@@ -4924,6 +4926,89 @@ class TestAddArgumentMetavar(TestCase):
 
     def test_nargs_3_metavar_length3(self):
         self.do_test_no_exception(nargs=3, metavar=("1", "2", "3"))
+
+# ==========================
+# metavar with () issue18349
+# ==========================
+
+class TestMetavarWithParen(TestCase):
+    "MutuallyExclusiveGroup trimming should not remove () from metavars"
+    def test_default_formatting(self):
+        "default usage with expanded range of choices"
+        full = r"\[-h\] \[--foo {0,1,2,3,4,5,6,7,8,9}\]\n"
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument("--foo", type=int, choices=range(10))
+        cm = parser.format_usage()
+        self.assertRegex(cm, full)
+
+    def test_format_with_metavar(self):
+        "usage with metavar"
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument("--foo", type=int, choices=range(20), metavar='range:20')
+        cm = parser.format_usage()
+        self.assertRegex(cm, r'usage: (.*) \[\-h\] \[--foo range:20\]\n')
+
+    def test_format_with_paren(self):
+        "usage with a metavar that include ()"
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument("--foo", type=int, choices=range(20), metavar='range(0,20)')
+        cm = parser.format_usage()
+        self.assertRegex(cm, r'usage: (.*) \[-h\] \[--foo range\(0,20\)\]\n')
+
+    def test_format_with_paren_errormsg(self):
+        "metavar has no effect on the choices error message - yet"
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument("--foo", type=int, choices=range(20), metavar='range(0,20)')
+        self.assertEqual(parser.parse_args(['--foo','1']), NS(foo=1))
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args(['--foo','21'])
+        msg = str(cm.exception)
+        self.assertRegex(msg, 'invalid choice')
+        self.assertNotIn(msg, 'range\(0,20\)')
+
+    def test_format_with_paren_start(self):
+        "usage with a metavar that include (); ( at start of string"
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument("--foo", type=int, choices=range(20), metavar='(mid)post')
+        cm = parser.format_usage()
+        self.assertRegex(cm, r'usage: (.*) \[-h\] \[--foo \(mid\)post\]\n')
+
+    def test_format_with_metavar_with_comma(self):
+        "issue16360"
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument('-c', '--channel', metavar='CHANNEL[=LABEL],...',
+                    action='append', default=[], help='Channels to plot')
+        cm = parser.format_usage()
+        # 'usage: python3 -m unittest [-h] [-c CHANNEL[=LABEL],...]\n'
+        self.assertRegex(cm, r'usage: (.*) \[-h\] \[-c CHANNEL\[=LABEL\],...\]\n')
+
+    def test_format_with_suppress_mutually_exclusive_group(self):
+        "issue17890"
+        parser = ErrorRaisingArgumentParser()
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument('--spam', help=argparse.SUPPRESS)
+        parser.add_argument('--' + 'eggs' * 10, dest='eggs')
+        cm = parser.format_usage()
+        #
+        self.assertRegex(cm,
+            r'usage: (.*) \[-h\]\n                           \[--eggseggseggseggseggseggseggseggseggseggs EGGS\]\n')
+
+    def test_format_with_suppress_mutually_exclusive_group1(self):
+        "issue17890"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument('--spam', help=argparse.SUPPRESS)
+        eggs = '--'+ 'eggs' * 20
+        parser.add_argument(eggs, dest='eggs')
+        cm = parser.format_usage()
+        #
+        usage = """\
+        usage: PROG [-h]
+                    [%s EGGS]
+        """%eggs
+        self.assertEqual(cm, textwrap.dedent(usage))
+
+
 
 # ============================
 # from argparse import * tests
