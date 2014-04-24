@@ -820,11 +820,60 @@ class TestPositionalsNargsZeroOrMoreDefault(ParserTestCase):
     ]
 
 
+class TestPositionalsNargsZeroOrMoreChoices(ParserTestCase):
+    """Test a Positional that specifies unlimited nargs with choices"""
+
+    argument_signatures = [Sig('foo', nargs='*', choices=['a', 'b', 'c'])]
+    failures = ['-x', 'spam']
+    successes = [
+        ('', NS(foo=[])),
+        ('a', NS(foo=['a'])),
+        ('a b', NS(foo=['a', 'b'])),
+    ]
+
+
+class TestPositionalsNargsZeroOrMoreChoicesDefault1(ParserTestCase):
+    """Test a Positional that specifies unlimited nargs with choices"""
+
+    argument_signatures = [Sig('foo', nargs='*', choices=['a', 'b', 'c'], default='c')]
+    failures = ['-x', 'spam']
+    successes = [
+        ('', NS(foo='c')),
+        ('a', NS(foo=['a'])),
+        ('a b', NS(foo=['a', 'b'])),
+    ]
+
+
+
+class TestPositionalsNargsZeroOrMoreChoicesDefault2(ParserTestCase):
+    """Test a Positional that specifies unlimited nargs with choices"""
+
+    argument_signatures = [Sig('foo', nargs='*', choices=['a', 'b', 'c'], default=['a', 'b'])]
+    failures = ['-x', 'spam']
+    successes = [
+        ('', NS(foo=['a', 'b'])),
+        ('a', NS(foo=['a'])),
+        ('a b', NS(foo=['a', 'b'])),
+    ]
+
+
+
 class TestPositionalsNargsOneOrMore(ParserTestCase):
     """Test a Positional that specifies one or more nargs"""
 
     argument_signatures = [Sig('foo', nargs='+')]
     failures = ['', '-x']
+    successes = [
+        ('a', NS(foo=['a'])),
+        ('a b', NS(foo=['a', 'b'])),
+    ]
+
+
+class TestPositionalsNargsOneOrMoreChoices(ParserTestCase):
+    """Test a Positional that specifies one or more nargs with choices"""
+
+    argument_signatures = [Sig('foo', nargs='+', choices=['a', 'b', 'c'])]
+    failures = ['', '-x', 'spam']
     successes = [
         ('a', NS(foo=['a'])),
         ('a b', NS(foo=['a', 'b'])),
