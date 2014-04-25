@@ -72,6 +72,7 @@ __all__ = [
     'RawDescriptionHelpFormatter',
     'RawTextHelpFormatter',
     'MetavarTypeHelpFormatter',
+    'ReGroupHelpFormatter',
     'Namespace',
     'Action',
     'ONE_OR_MORE',
@@ -669,7 +670,55 @@ class MetavarTypeHelpFormatter(HelpFormatter):
     def _get_default_metavar_for_positional(self, action):
         return action.type.__name__
 
+class ReGroupHelpFormatter(HelpFormatter):
+    """Help message formatter that handles regrouping of positional args
+    e.g. '[arg1] [arg2]' => '[arg1 [arg2]]'
 
+    Only the name of this class is considered a public API. All the methods
+    provided by the class are considered an implementation detail.
+
+    Thie regroups optional positionals
+    """
+
+    def _format_actions_usage(self, actions, groups):
+        self._deduce_prefixchars(actions)
+        parts = super(ReGroupHelpFormatter, self)._format_actions_usage(actions, groups)
+        #print('parts',parts)
+        parts = self._positionals_regroup(parts)
+        #print(parts)
+        return parts
+
+    def _deduce_prefixchars(self, actions):
+        optionals = [action for action in actions if action.option_strings]
+        chars = {str[0] for action in optionals for str in action.option_strings}
+        self.prefix_chars = chars # make available to regroup fn
+
+    def _positionals_regroup(self, parts):
+        # change ['[arg1]','[arg2]'] to ['[arg1 [arg2]]']
+        # apply to a list of formatted arguments
+        # don't apply to optionals (with prefix chars) or groups
+        chars = getattr(self, 'prefix_chars',set('-'))
+        R = _re.compile(r'\] \[(.*)\]')
+        result = []
+        text = None
+        while  parts:
+            part = parts.pop()
+            if part:
+                if part[0]=='[' and part[1] not in chars and '|' not in part:
+                    if text:
+                        text = ' '.join([part, text])
+                    else:
+                        text = part
+                    if R.search(text):
+                        text = R.sub(' [\g<1>]]',text)
+                else:
+                    if text:
+                        result.insert(0,text)
+                        text = None
+                    result.insert(0,part)
+        if text:
+            result.insert(0,text)
+        return result
 
 # =====================
 # Options and Arguments
