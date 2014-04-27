@@ -4632,6 +4632,22 @@ class TestMessageContentError(TestCase):
         self.assertRegex(msg, 'req_pos')
         self.assertNotIn(msg, 'optional_positional')
 
+    def test_positional_metavars(self):
+        """issue 14074 -
+        bad error message: TypeError: sequence item 0: expected str instance, tuple found
+        that is, it could not convert a tuple metavar as a string
+        test that proper 'arguments are required' error
+        """
+        parser = ErrorRaisingArgumentParser(prog='PROG', usage='')
+        parser.add_argument('pos', nargs=2, metavar=('A', 'B'))
+        parser.add_argument('star', nargs='*', metavar=('A', 'B'))
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args([])
+        msg = str(cm.exception)
+        self.assertRegex(msg, 'the following arguments are required')
+        #self.assertRegex(msg, 'A B')
+        #self.assertRegex(msg, r'\[A \[B \.\.\.\]\]')
+        self.assertRegex(msg, r'A\|B')
 
 # ================================================
 # Check that the type function is called only once

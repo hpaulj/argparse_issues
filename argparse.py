@@ -531,9 +531,11 @@ class HelpFormatter(object):
         if not action.option_strings:
             default = self._get_default_metavar_for_positional(action)
             metavar = self._metavar_formatter(action, default)(1)
-            metavar = '|'.join(metavar)
-            return metavar
-
+            if len(metavar)==1:
+                return metavar[0] # usual case
+            else:
+                # positional with tuple metavar needs special handling
+                return _format_metavars(action, self)
         else:
             parts = []
 
@@ -688,13 +690,30 @@ class MetavarTypeHelpFormatter(HelpFormatter):
 # Options and Arguments
 # =====================
 
+def _format_metavars(action, formatter=None):
+    # issue14074 - for positional, turn a tuple metavar into a
+    # string that can be used for both help and error messages
+    # some alternative versions
+    return '|'.join(action.metavar)
+    #return str(action.metavar)
+    #return action.metavar[0]
+    if formatter is None:
+        # if called from a module function
+        formatter = HelpFormatter('')
+    # use format used in the usage line
+    metastr = formatter._format_args(action, action.dest)
+    return metastr
+
 def _get_action_name(argument):
     if argument is None:
         return None
     elif argument.option_strings:
         return  '/'.join(argument.option_strings)
     elif argument.metavar not in (None, SUPPRESS):
-        return argument.metavar
+        metavar = argument.metavar
+        if isinstance(metavar, tuple):
+            metavar = _format_metavars(argument)
+        return metavar
     elif argument.dest not in (None, SUPPRESS):
         return argument.dest
     else:
