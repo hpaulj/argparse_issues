@@ -92,6 +92,7 @@ import textwrap as _textwrap
 
 from gettext import gettext as _, ngettext
 
+"""
 import logging as _logging
 _logging.basicConfig(filename='issue9338.log',level=_logging.DEBUG)
 
@@ -105,7 +106,7 @@ def _log(*args):
     except AttributeError:
         pass
     _logging.info(args)
-
+"""
 
 SUPPRESS = '==SUPPRESS=='
 
@@ -154,6 +155,7 @@ def _is_mnrep(nargs):
     # test for are like string, {n,m}
     # return valid nargs, or False if not valid
     # it also converts a (m,n) tuple to equivalent {m,n} string
+    # could be action method
     if nargs is None:
         return False
     if isinstance(nargs, int):
@@ -173,6 +175,44 @@ def _is_mnrep(nargs):
             raise ValueError(str(e))
     else:
         return False
+
+def _format_choices(choices, expand=False, summarize=None):
+    # issue 16468
+    # consolidate the choices formatting in one place
+    # use formatting as before
+    # unless choices is not iterable
+    # in which case the repr()
+    # could make this an Action method
+    # another thing to use is the metavar
+    if hasattr(choices, '__contains__'):
+        rep = repr(choices)
+    else:
+        raise AttributeError('choices must support the in operator')
+    # or do ' ' in choices, which would raise
+    # TypeError: argument of type 'instance' is not iterable
+    try:
+        choice_strs = [str(choice) for choice in choices]
+        if summarize:
+            n = len(choice_strs)
+            if n>summarize:
+                split = [6,2]
+                if summarize<15:
+                    split = [summarize//3,2]
+                # should tweak this is n is close to 10
+                ll = [choice_strs[i] for i in range(0, split[0])]
+                ll += ['...']
+                ll += [choice_strs[i] for i in range(n-split[1],n)]
+                choice_strs = ll
+        if expand:
+            # expanded form used in help
+            result = ', '.join(choice_strs)
+        else:
+            # compact form used in usage
+            result = '{%s}' % ','.join(choice_strs)
+            rep = rep.replace(' ', '')
+    except TypeError:
+        return rep
+    return result
 
 # ===============
 # Formatting Help
@@ -475,7 +515,7 @@ class HelpFormatter(object):
                 pass
             elif not action.option_strings:
                 default = self._get_default_metavar_for_positional(action)
-                part = self._format_args(action, default)
+                part = action._format_args(default)
                 parts.append(part)
             else:
                 option_string = action.option_strings[0]
@@ -489,7 +529,7 @@ class HelpFormatter(object):
                 #    -s ARGS or --long ARGS
                 else:
                     default = self._get_default_metavar_for_optional(action)
-                    args_string = self._format_args(action, default)
+                    args_string = action._format_args(default)
                     part = '%s %s' % (option_string, args_string)
 
                 # make it look optional if it's not required
@@ -555,8 +595,12 @@ class HelpFormatter(object):
     def _format_action_invocation(self, action):
         if not action.option_strings:
             default = self._get_default_metavar_for_positional(action)
-            metavar = self._metavar_formatter(action, default)(1)
-            metavar = '|'.join(metavar)
+            metavar = action._metavar_formatter(default)(1)
+            if len(metavar)>1:
+                metavar = action.get_name()
+                # return _format_metavars(action, self)
+            else:
+                metavar = metavar[0]
             return metavar
 
         else:
@@ -571,51 +615,14 @@ class HelpFormatter(object):
             #    -s ARGS, --long ARGS
             else:
                 default = self._get_default_metavar_for_optional(action)
-                args_string = self._format_args(action, default)
+                args_string = action._format_args(default)
                 for option_string in action.option_strings:
                     parts.append('%s %s' % (option_string, args_string))
 
             return ', '.join(parts)
 
-    def _metavar_formatter(self, action, default_metavar):
-        if action.metavar is not None:
-            result = action.metavar
-        elif action.choices is not None:
-            choice_strs = [str(choice) for choice in action.choices]
-            result = '{%s}' % ','.join(choice_strs)
-        else:
-            result = default_metavar
-
-        def format(tuple_size):
-            if isinstance(result, tuple):
-                return result
-            else:
-                return (result, ) * tuple_size
-        return format
-
-    def _format_args(self, action, default_metavar):
-        get_metavar = self._metavar_formatter(action, default_metavar)
-        if action.nargs is None:
-            result = '%s' % get_metavar(1)
-        elif action.nargs == OPTIONAL:
-            result = '[%s]' % get_metavar(1)
-        elif action.nargs == ZERO_OR_MORE:
-            result = '[%s [%s ...]]' % get_metavar(2)
-        elif action.nargs == ONE_OR_MORE:
-            result = '%s [%s ...]' % get_metavar(2)
-        elif action.nargs == REMAINDER:
-            result = '...'
-        elif action.nargs == PARSER:
-            result = '%s ...' % get_metavar(1)
-        elif _is_mnrep(action.nargs):
-            result = '%s%s' % (get_metavar(1)[0], action.nargs)
-        else:
-            if not isinstance(action.nargs, int):
-                valid_nargs = [None,OPTIONAL,ZERO_OR_MORE,ONE_OR_MORE,REMAINDER,PARSER]
-                raise ValueError('nargs %r not integer or %s'%(action.nargs, valid_nargs))
-            formats = ['%s' for _ in range(action.nargs)]
-            result = ' '.join(formats) % get_metavar(action.nargs)
-        return result
+    #def _format_args(self, action, default_metavar):
+    #    return action._format_args(default_metavar)
 
     def _expand_help(self, action):
         params = dict(vars(action), prog=self._prog)
@@ -626,7 +633,8 @@ class HelpFormatter(object):
             if hasattr(params[name], '__name__'):
                 params[name] = params[name].__name__
         if params.get('choices') is not None:
-            choices_str = ', '.join([str(c) for c in params['choices']])
+            #choices_str = ', '.join([str(c) for c in params['choices']])
+            choices_str = _format_choices(params['choices'], expand=True)
             params['choices'] = choices_str
         return self._get_help_string(action) % params
 
@@ -721,16 +729,9 @@ class MetavarTypeHelpFormatter(HelpFormatter):
 def _get_action_name(argument):
     if argument is None:
         return None
-    elif argument.option_strings:
-        return  '/'.join(argument.option_strings)
-    elif argument.metavar not in (None, SUPPRESS):
-        return argument.metavar
-    elif argument.dest not in (None, SUPPRESS):
-        return argument.dest
-    elif hasattr(argument, 'name'):
-        return argument.name()
     else:
-        return None
+        # move rest to this Action
+        return argument.get_name()
 
 
 class ArgumentError(Exception):
@@ -852,6 +853,167 @@ class Action(_AttributeHolder):
     def __call__(self, parser, namespace, values, option_string=None):
         raise NotImplementedError(_('.__call__() not defined'))
 
+    def get_name(self, default_metavar=None):
+        """
+        Action name, used by help formatting and error messages
+        The calling stack is not clean, but works for now
+        """
+        if self.option_strings:
+            return  '/'.join(self.option_strings)
+        # positional
+        metavar = self.metavar
+        if self.metavar not in (None, SUPPRESS):
+            if isinstance(metavar, tuple):
+                # use a method to reduce a tuple to a string
+                return self._format_metavars() # 14704
+            else:
+                return metavar
+        elif self.dest not in (None, SUPPRESS):
+            return self.dest
+        elif hasattr(self, 'name'):  # action.name
+            return self.name()
+        else:
+            return None
+
+    def _get_nargs_pattern(self):
+        # in all examples below, we have to allow for '--' args
+        # which are represented as '-' in the pattern
+        nargs = self.nargs
+
+        # the default (None) is assumed to be a single argument
+        if nargs is None:
+            nargs_pattern = '(-*A-*)'
+
+        # allow zero or one arguments
+        elif nargs == OPTIONAL:
+            nargs_pattern = '(-*A?-*)'
+
+        # allow zero or more arguments
+        elif nargs == ZERO_OR_MORE:
+            nargs_pattern = '(-*[A-]*)'
+
+        # allow one or more arguments
+        elif nargs == ONE_OR_MORE:
+            nargs_pattern = '(-*A[A-]*)'
+
+        # allow any number of options or arguments
+        elif nargs == REMAINDER:
+            nargs_pattern = '([-AO]*)'
+
+        # allow one argument followed by any number of options or arguments
+        elif nargs == PARSER:
+            nargs_pattern = '(-*A[-AO]*)'
+
+        # n to m arguments, nargs is re like {n,m}
+        elif _is_mnrep(nargs):
+            nargs_pattern = '([-A]%s)'%nargs
+
+        # all others should be integers
+        else:
+            if not isinstance(self.nargs, int):
+                raise ValueError('nargs %r not integer or valid string'%(self.nargs))
+            nargs_pattern = '(-*%s-*)' % '-*'.join('A' * nargs)
+
+        # if this is an optional action, -- is not allowed
+        if self.option_strings:
+            nargs_pattern = nargs_pattern.replace('-*', '')
+            nargs_pattern = nargs_pattern.replace('-', '')
+
+        # return the pattern
+        return nargs_pattern
+
+    def _format_args(self, default_metavar):
+        # moved from HelpFormatter
+        # put in an ActionFormatter?
+        get_metavar = self._metavar_formatter(default_metavar)
+        if self.nargs is None:
+            result = '%s' % get_metavar(1)
+        elif self.nargs == OPTIONAL:
+            result = '[%s]' % get_metavar(1)
+        elif self.nargs == ZERO_OR_MORE:
+            result = '[%s [%s ...]]' % get_metavar(2)
+        elif self.nargs == ONE_OR_MORE:
+            result = '%s [%s ...]' % get_metavar(2)
+        elif self.nargs == REMAINDER:
+            result = '...'
+        elif self.nargs == PARSER:
+            result = '%s ...' % get_metavar(1)
+        elif _is_mnrep(self.nargs):
+            result = '%s%s' % (get_metavar(1)[0], self.nargs)
+        else:
+            if not isinstance(self.nargs, int):
+                valid_nargs = [None,OPTIONAL,ZERO_OR_MORE,ONE_OR_MORE,REMAINDER,PARSER]
+                raise ValueError('nargs %r not integer or %s'%(self.nargs, valid_nargs))
+            formats = ['%s' for _ in range(self.nargs)]
+            result = ' '.join(formats) % get_metavar(self.nargs)
+        return result
+
+    def _metavar_formatter(self, default_metavar):
+        if self.metavar is not None:
+            result = self.metavar
+        elif self.choices is not None:
+            #choice_strs = [str(choice) for choice in self.choices]
+            #result = '{%s}' % ','.join(choice_strs)
+            result = _format_choices(self.choices)
+        else:
+            result = default_metavar
+
+        def format(tuple_size):
+            if isinstance(result, tuple):
+                return result
+            else:
+                return (result, ) * tuple_size
+        return format
+
+    def _format_metavars(self, formatter=None):
+        # issue14074 - for positional, turn a tuple metavar into a
+        # string that can be used for both help and error messages
+        # some alternative versions
+        return '|'.join(self.metavar)  # e.g W1|W2  W1..W2
+        #return str(self.metavar)  # e.g.  ('W1', 'W2')
+        #return self.metavar[0]   # e.g. W1
+        #return self._format_args(self.dest) # e.g. W1 [W2 ...]
+
+    def _is_nargs_variable(self):
+        # return true if action takes variable number of args
+        if self.nargs in [OPTIONAL, ZERO_OR_MORE, ONE_OR_MORE, REMAINDER, PARSER]:
+            return True
+        if _is_mnrep(self.nargs):
+            return True
+        return False
+
+    def _check_value(self, value):
+        # converted value must be one of the choices (if specified)
+        # moved from parser
+        if self.choices is not None and value not in self.choices:
+            args = {'value': value,
+                    'choices': ', '.join(map(repr, self.choices))}
+            msg = _('invalid choice: %(value)r (choose from %(choices)s)')
+            raise ArgumentError(self, msg % args)
+
+    def _check_value(self, value):
+        # issue16468 version
+        # converted value must be one of the choices (if specified)
+        if self.choices is not None:
+            choices = self.choices
+            if isinstance(choices, str):
+                # so 'in' does not find substrings
+                choices = list(choices)
+            try:
+                aproblem = value not in choices
+            except Exception as e:
+                msg = _('invalid choice: %r, %s'%(value, e))
+                # e.g. None not in 'astring'
+                raise ArgumentError(self, msg)
+            if aproblem:
+                # summarize is # choices exceeds this value
+                # is there a reasonable way of giving user control of this?
+                args = {'value': value,
+                        #'choices': ', '.join(map(repr, self.choices)),
+                        'choices': _format_choices(choices, summarize=15),
+                        }
+                msg = _('invalid choice: %(value)r (choose from %(choices)s)')
+                raise ArgumentError(self, msg % args)
 
 class _StoreAction(Action):
 
@@ -1379,7 +1541,8 @@ class _ActionsContainer(object):
         # raise an error if the metavar does not match the type
         if hasattr(self, "_get_formatter"):
             try:
-                self._get_formatter()._format_args(action, None)
+                #self._get_formatter()._format_args(action, None)
+                action._format_args(None)
             except TypeError:
                 raise ValueError("length of metavar tuple does not match nargs")
 
@@ -1788,12 +1951,17 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             raise ArgumentError(action, str(e))
 
         try:
-            self._get_formatter()._format_args(action, None)
-        except ValueError as e:
+            # self._get_formatter()._format_args(action, None)
+            action._format_args(None)
+        except (ValueError, AttributeError) as e:
             raise ArgumentError(action, str(e))
         except TypeError:
             #raise ValueError("length of metavar tuple does not match nargs")
             raise ArgumentError(action, "length of metavar tuple does not match nargs")
+        #except TypeError as e: # 16468
+        #    msg = _(str(e))
+        #    if _re.search(r'argument(.*)format', msg):
+        #        msg = _("length of metavar tuple does not match nargs")
 
     # =====================================
     # Command line argument parsing methods
@@ -1974,11 +2142,11 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
                     # if action takes a variable number of arguments, see
                     # if it needs to share any with remaining positionals
-                    _log(action.dest, arg_count, selected_patterns, selected_patterns.count('O'))
-                    if self._is_nargs_variable(action):
+                    #_log(action.dest, arg_count, selected_patterns, selected_patterns.count('O'))
+                    if action._is_nargs_variable():
                         # variable range of args for this action
                         slots = self._match_arguments_partial([action]+positionals, selected_patterns)
-                        _log('    opt+pos slots',slots)
+                        #_log('    opt+pos slots',slots)
                         shared_count = slots[0]
                     else:
                         shared_count = None
@@ -1990,7 +2158,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                     if shared_count is not None and selected_patterns.count('O')<=penult:
                         # _log('    COUNTS:',arg_count, shared_count)
                         if arg_count>shared_count:
-                            _log('    changing arg_count %s to shared_count %s'%(arg_count,shared_count))
+                            #_log('    changing arg_count %s to shared_count %s'%(arg_count,shared_count))
                             arg_count = shared_count
 
                     stop = start + arg_count
@@ -2084,9 +2252,9 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
         penult = arg_strings_pattern.count('O') # # of 'O' in 'AOAA' patttern
         opt_actions = [v[0] for v in option_string_indices.values() if v[0]]
-        _log(arg_strings_pattern, penult,
-            {'%s%s'%(v.dest,(v.nargs if v.nargs else '')) for v in opt_actions},
-            ['%s%s'%(k.dest,(k.nargs if k.nargs else '')) for k in positionals])
+        #_log(arg_strings_pattern, penult,
+        #    {'%s%s'%(v.dest,(v.nargs if v.nargs else '')) for v in opt_actions},
+        #    ['%s%s'%(k.dest,(k.nargs if k.nargs else '')) for k in positionals])
 
         _cnt = 0
         if self._is_nargs_variable(opt_actions) and positionals and penult>1:
@@ -2099,13 +2267,14 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 extras = consume_loop(True, ii)
                 _cnt += 1
                 if len(positionals)==0:
-                    _log('  PENULT',ii, (extras if extras else ''), 'all pos matched')
+                    #_log('  PENULT',ii, (extras if extras else ''), 'all pos matched')
                     break
                 else:
-                    _log('  PENULT',ii,
-                        (extras if extras else ''), '%s pos left'%len(positionals))
+                    pass
+                    #_log('  PENULT',ii,
+                    #    (extras if extras else ''), '%s pos left'%len(positionals))
             if positionals:
-                _log('  Positionals after penult')
+                pass #_log('  Positionals after penult')
         else:
             # don't need a test run; but do use action+positionals parsing
             ii = 0
@@ -2114,7 +2283,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         positionals = self._get_positional_actions()
         extras = consume_loop(False, ii)
         _cnt += 1
-        _log('  II', _cnt, penult, arg_strings_pattern, extras, len(positionals))
+        #_log('  II', _cnt, penult, arg_strings_pattern, extras, len(positionals))
 
 
         # make sure all required actions were present and also convert
@@ -2158,7 +2327,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                     self.error(msg % ' '.join(names))
 
         # return the updated namespace and the extra arguments
-        _log(namespace,extras)
+        #_log(namespace,extras)
         return namespace, extras
 
     def _read_args_from_files(self, arg_strings):
@@ -2192,7 +2361,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
     def _match_argument(self, action, arg_strings_pattern):
         # match the pattern for this action to the arg strings
-        nargs_pattern = self._get_nargs_pattern(action)
+        nargs_pattern = action._get_nargs_pattern()
         match = _re.match(nargs_pattern, arg_strings_pattern)
 
         # raise an exception if we weren't able to find a match
@@ -2217,7 +2386,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         result = []
         for i in range(len(actions), 0, -1):
             actions_slice = actions[:i]
-            pattern = ''.join([self._get_nargs_pattern(action)
+            pattern = ''.join([action._get_nargs_pattern()
                                for action in actions_slice])
             match = _re.match(pattern, arg_strings_pattern)
             if match is not None:
@@ -2358,63 +2527,12 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # return the collected option tuples
         return result
 
-    def _get_nargs_pattern(self, action):
-        # in all examples below, we have to allow for '--' args
-        # which are represented as '-' in the pattern
-        nargs = action.nargs
+    #def _get_nargs_pattern(self, action):
+    #    return action._get_nargs_pattern()
 
-        # the default (None) is assumed to be a single argument
-        if nargs is None:
-            nargs_pattern = '(-*A-*)'
-
-        # allow zero or one arguments
-        elif nargs == OPTIONAL:
-            nargs_pattern = '(-*A?-*)'
-
-        # allow zero or more arguments
-        elif nargs == ZERO_OR_MORE:
-            nargs_pattern = '(-*[A-]*)'
-
-        # allow one or more arguments
-        elif nargs == ONE_OR_MORE:
-            nargs_pattern = '(-*A[A-]*)'
-
-        # allow any number of options or arguments
-        elif nargs == REMAINDER:
-            nargs_pattern = '([-AO]*)'
-
-        # allow one argument followed by any number of options or arguments
-        elif nargs == PARSER:
-            nargs_pattern = '(-*A[-AO]*)'
-
-        # n to m arguments, nargs is re like {n,m}
-        elif _is_mnrep(nargs):
-            nargs_pattern = '([-A]%s)'%nargs
-
-        # all others should be integers
-        else:
-            if not isinstance(action.nargs, int):
-                raise ValueError('nargs %r not integer or valid string'%(action.nargs))
-            nargs_pattern = '(-*%s-*)' % '-*'.join('A' * nargs)
-
-        # if this is an optional action, -- is not allowed
-        if action.option_strings:
-            nargs_pattern = nargs_pattern.replace('-*', '')
-            nargs_pattern = nargs_pattern.replace('-', '')
-
-        # return the pattern
-        return nargs_pattern
-
-    def _is_nargs_variable(self, action):
-        # return true if action, or any action in a list, takes variable number of args
-        if isinstance(action,list):
-            return any(self._is_nargs_variable(a) for a in action)
-        else:
-            if action.nargs in [OPTIONAL, ZERO_OR_MORE, ONE_OR_MORE, REMAINDER, PARSER]:
-                return True
-            if _is_mnrep(action.nargs):
-                return True
-            return False
+    def _is_nargs_variable(self, actions):
+        # return true if  any action in a list, takes variable number of args
+        return any(a._is_nargs_variable() for a in actions)
 
     # ========================
     # Value conversion methods
@@ -2437,7 +2555,8 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 using_default = True
             if isinstance(value, str):
                 value = self._get_value(action, value)
-                self._check_value(action, value)
+                # self._check_value(action, value)
+                action._check_value(value)
 
         # when nargs='*' on a positional, if there were no command-line
         # args, use the default if it is anything other than None
@@ -2448,13 +2567,15 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             else:
                 value = arg_strings
             using_default = True
-            self._check_value(action, value)
+            #self._check_value(action, value)
+            action._check_value(value)
 
         # single argument or optional argument produces a single value
         elif len(arg_strings) == 1 and action.nargs in [None, OPTIONAL]:
             arg_string, = arg_strings
             value = self._get_value(action, arg_string)
-            self._check_value(action, value)
+            #self._check_value(action, value)
+            action._check_value(value)
 
         # REMAINDER arguments convert all values, checking none
         elif action.nargs == REMAINDER:
@@ -2463,13 +2584,15 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # PARSER arguments convert all values, but check only the first
         elif action.nargs == PARSER:
             value = [self._get_value(action, v) for v in arg_strings]
-            self._check_value(action, value[0])
+            #self._check_value(action, value[0])
+            action._check_value(value[0])
 
         # all other types of nargs produce a list
         else:
             value = [self._get_value(action, v) for v in arg_strings]
             for v in value:
-                self._check_value(action, v)
+                #self._check_value(action, v)
+                action._check_value(v)
 
         # return the converted value
         return value, using_default
@@ -2500,13 +2623,13 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # return the converted value
         return result
 
-    def _check_value(self, action, value):
-        # converted value must be one of the choices (if specified)
-        if action.choices is not None and value not in action.choices:
-            args = {'value': value,
-                    'choices': ', '.join(map(repr, action.choices))}
-            msg = _('invalid choice: %(value)r (choose from %(choices)s)')
-            raise ArgumentError(action, msg % args)
+    #def _check_value(self, action, value):
+    #    # converted value must be one of the choices (if specified)
+    #    if action.choices is not None and value not in action.choices:
+    #        args = {'value': value,
+    #                'choices': ', '.join(map(repr, action.choices))}
+    #        msg = _('invalid choice: %(value)r (choose from %(choices)s)')
+    #        raise ArgumentError(action, msg % args)
 
     # =======================
     # Help-formatting methods
