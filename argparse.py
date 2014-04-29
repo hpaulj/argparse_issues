@@ -150,7 +150,8 @@ def _is_mnrep(nargs):
             nargs = '{%s,%s}'%nargs
             nargs = nargs.replace('None','')
         else:
-            raise ValueError('nargs tuple requires 2 integers')
+            msg = _('nargs tuple requires 2 integers')
+            raise ValueError(msg)
     m = _re.match('{(\d*),(\d*)}',nargs)
     if m:
         try:
@@ -172,7 +173,8 @@ def _format_choices(choices, expand=False, summarize=None):
     if hasattr(choices, '__contains__'):
         rep = repr(choices)
     else:
-        raise AttributeError('choices must support the in operator')
+        msg = _('choices must support the in operator')
+        raise AttributeError(msg)
     # or do ' ' in choices, which would raise
     # TypeError: argument of type 'instance' is not iterable
     try:
@@ -374,7 +376,7 @@ class HelpFormatter(object):
             # build full usage string
             format = self._format_actions_usage
             action_parts = format(optionals + positionals, groups)
-            usage = ' '.join([s for s in [prog]+action_parts if s])
+            usage = ' '.join([prog]+action_parts)
 
             # wrap the usage parts if it's too long
             text_width = self._width - self._current_indent
@@ -464,6 +466,7 @@ class HelpFormatter(object):
                 if part:
                     parts += part
                 i += 1
+        parts = [s for s in parts if s] # remove '' parts
         return parts
 
     def _format_group_usage(self, group):
@@ -581,13 +584,7 @@ class HelpFormatter(object):
         if not action.option_strings:
             default = self._get_default_metavar_for_positional(action)
             metavar = action._metavar_formatter(default)()
-            #if len(metavar)>1:
-            #    metavar = action.get_name()
-            #    # return _format_tuple_metavar(action, self)
-            #else:
-            #    metavar = metavar[0]
             return metavar
-
         else:
             parts = []
 
@@ -605,9 +602,6 @@ class HelpFormatter(object):
                     parts.append('%s %s' % (option_string, args_string))
 
             return ', '.join(parts)
-
-    #def _format_args(self, action, default_metavar):
-    #    return action._format_args(default_metavar)
 
     def _expand_help(self, action):
         params = dict(vars(action), prog=self._prog)
@@ -872,7 +866,7 @@ class Action(_AttributeHolder):
     def __call__(self, parser, namespace, values, option_string=None):
         raise NotImplementedError(_('.__call__() not defined'))
 
-    def get_name(self, default_metavar=None):
+    def get_name(self, metavar=None):
         """
         Action name, used in error messages
         can also be used by help line formatter
@@ -881,7 +875,9 @@ class Action(_AttributeHolder):
         if self.option_strings:
             return  '/'.join(self.option_strings)
         # positional
-        metavar = self.metavar
+        if metavar is None:
+            # caller may over over ride metavar
+            metavar = self.metavar
         if metavar not in (None, SUPPRESS):
             if isinstance(metavar, tuple):
                 # use a method to reduce a tuple to a string
@@ -896,6 +892,7 @@ class Action(_AttributeHolder):
             return None
 
     def _get_nargs_pattern(self):
+        # translate nargs to patterns used by parser
         # in all examples below, we have to allow for '--' args
         # which are represented as '-' in the pattern
         nargs = self.nargs
@@ -931,7 +928,8 @@ class Action(_AttributeHolder):
         # all others should be integers
         else:
             if not isinstance(self.nargs, int):
-                raise ValueError('nargs %r not integer or valid string'%(self.nargs))
+                msg = _('nargs %r not integer or valid string'%(self.nargs))
+                raise ValueError(msg)
             nargs_pattern = '(-*%s-*)' % '-*'.join('A' * nargs)
 
         # if this is an optional action, -- is not allowed
@@ -944,7 +942,7 @@ class Action(_AttributeHolder):
 
     def _format_args(self, default_metavar):
         # moved from HelpFormatter
-        # put in an ActionFormatter?
+        # translate nargs into usage string
         get_metavar = self._metavar_formatter(default_metavar)
         if self.nargs is None:
             result = '%s' % get_metavar(1)
@@ -963,12 +961,14 @@ class Action(_AttributeHolder):
         else:
             if not isinstance(self.nargs, int):
                 valid_nargs = [None,OPTIONAL,ZERO_OR_MORE,ONE_OR_MORE,REMAINDER,PARSER]
-                raise ValueError('nargs %r not integer or %s'%(self.nargs, valid_nargs))
+                msg = _('nargs %r not integer or %s'%(self.nargs, valid_nargs))
+                raise ValueError(msg)
             formats = ['%s' for _ in range(self.nargs)]
             result = ' '.join(formats) % get_metavar(self.nargs)
         return result
 
     def _metavar_formatter(self, default_metavar):
+        # return a function that returns a string or tuple
         if self.metavar is not None:
             result = self.metavar
         elif self.choices is not None:
@@ -979,9 +979,8 @@ class Action(_AttributeHolder):
         def format(tuple_size=None):
             if tuple_size is None:
                 if isinstance(result, tuple):
-                    # want one string for positional name
+                    # use get_name to convert tuple to string
                     return self.get_name(result)
-                    # ':'.join(result)
                 else:
                     return result
             else:
@@ -989,13 +988,12 @@ class Action(_AttributeHolder):
                     if len(result)==tuple_size:
                         return result
                     else:
-                        msg = 'length of metavar tuple does not match nargs'
+                        msg = _('length of metavar tuple does not match nargs')
                         raise ValueError(msg)
                 else:
                     return (result, ) * tuple_size
 
         return format
-
 
     def _format_tuple_metavar(self, formatter=None):
         # issue14074 - for positional, turn a tuple metavar into a
@@ -1013,15 +1011,6 @@ class Action(_AttributeHolder):
         if _is_mnrep(self.nargs):
             return True
         return False
-
-    def _check_value(self, value):
-        # converted value must be one of the choices (if specified)
-        # moved from parser
-        if self.choices is not None and value not in self.choices:
-            args = {'value': value,
-                    'choices': ', '.join(map(repr, self.choices))}
-            msg = _('invalid choice: %(value)r (choose from %(choices)s)')
-            raise ArgumentError(self, msg % args)
 
     def _check_value(self, value):
         # issue16468 version
@@ -1046,6 +1035,22 @@ class Action(_AttributeHolder):
                         }
                 msg = _('invalid choice: %(value)r (choose from %(choices)s)')
                 raise ArgumentError(self, msg % args)
+
+    def _check_nargs(self):
+       # check nargs and metavar tuple
+
+        # test for {m,n} rep; convert a (m,n) tuple if needed
+        try:
+            nargs = _is_mnrep(self.nargs)
+            if nargs:
+                self.nargs = nargs
+        except ValueError as e:
+            raise ArgumentError(self, str(e))
+
+        try:
+            self._format_args(None)
+        except (ValueError, AttributeError) as e:
+            raise ArgumentError(self, str(e))
 
 class _StoreAction(Action):
 
@@ -1442,7 +1447,7 @@ class Namespace(_AttributeHolder):
         try:
             return self.__dict__[name.replace('-', '_')]
         except KeyError:
-            msg = "'%s' object has no attribute '%s'"
+            msg = _("'%s' object has no attribute '%s'")
             raise AttributeError(msg % (type(self).__name__, name))
 
 
@@ -1567,18 +1572,7 @@ class _ActionsContainer(object):
         if not callable(type_func):
             raise ValueError('%r is not callable' % (type_func,))
 
-        if hasattr(self, "_check_argument"):
-            self._check_argument(action)
-
-        # raise an error if the metavar does not match the type
-        if hasattr(self, "_get_formatter"):
-            try:
-                #self._get_formatter()._format_args(action, None)
-                action._format_args(None)
-            except TypeError:
-                # no test_argparse getting here
-                raise ValueError("length of metavar tuple does not match nargs")
-
+        action._check_nargs()
         return self._add_action(action)
 
     def add_argument_group(self, *args, **kwargs):
@@ -1793,7 +1787,6 @@ class _ArgumentGroup(_ActionsContainer):
         self._has_negative_number_optionals = \
             container._has_negative_number_optionals
         self._mutually_exclusive_groups = container._mutually_exclusive_groups
-        self._check_argument = container._check_argument
 
     def _add_action(self, action):
         action = super(_ArgumentGroup, self)._add_action(action)
@@ -1969,33 +1962,6 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         return [action
                 for action in self._actions
                 if not action.option_strings]
-
-    def _check_argument(self, action):
-        # check action arguments
-        # focus on the arguments that the parent container does not know about
-        # check nargs and metavar tuple
-        # move this to Action??
-
-        # test for {m,n} rep; convert a (m,n) tuple if needed
-        try:
-            nargs = _is_mnrep(action.nargs)
-            if nargs:
-                action.nargs = nargs
-        except ValueError as e:
-            raise ArgumentError(action, str(e))
-
-        try:
-            action._format_args(None)
-        except (ValueError, AttributeError) as e:
-            raise ArgumentError(action, str(e))
-        except TypeError:
-            # no test_argparse getting here
-            msg = "length of metavar tuple does not match nargs"
-            raise ArgumentError(action, msg)
-        #except TypeError as e: # 16468
-        #    msg = _(str(e))
-        #    if _re.search(r'argument(.*)format', msg):
-        #        msg = _("length of metavar tuple does not match nargs")
 
     # =====================================
     # Command line argument parsing methods
@@ -2639,14 +2605,6 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
         # return the converted value
         return result
-
-    #def _check_value(self, action, value):
-    #    # converted value must be one of the choices (if specified)
-    #    if action.choices is not None and value not in action.choices:
-    #        args = {'value': value,
-    #                'choices': ', '.join(map(repr, action.choices))}
-    #        msg = _('invalid choice: %(value)r (choose from %(choices)s)')
-    #        raise ArgumentError(action, msg % args)
 
     # =======================
     # Help-formatting methods
