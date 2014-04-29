@@ -4859,6 +4859,31 @@ class TestHelpMetavarArgumentsInnerBracketSplitLines(HelpTestCase):
        '''.format(long_d, long_a)
     version = ''
 
+class TestHelpCompactFormatter(HelpTestCase):
+    """"""
+
+    parser_signature = Sig(prog='PROG', description='description',
+                           formatter_class=argparse.CompactHelpFormatter)
+    argument_signatures = [Sig('a', choices=['a','b','c']),
+                           Sig('-b', '--boo'),
+                           Sig('-c', '--compact', type=float, metavar='SOME FLOAT')]
+    argument_group_signatures = []
+    usage = '''\
+        usage: PROG [-h] [-b BOO] [-c SOME FLOAT] {a,b,c}
+        '''
+    help = usage + '''\
+
+        description
+
+        positional arguments:
+          {a,b,c}
+
+        optional arguments:
+          -h/--help             show this help message and exit
+          -b/--boo BOO
+          -c/--compact SOME FLOAT
+        '''
+    version = ''
 
 # =====================================
 # Optional/Positional constructor tests

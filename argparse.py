@@ -72,6 +72,7 @@ __all__ = [
     'RawDescriptionHelpFormatter',
     'RawTextHelpFormatter',
     'MetavarTypeHelpFormatter',
+    'CompactHelpFormatter',
     'Namespace',
     'Action',
     'ONE_OR_MORE',
@@ -91,22 +92,6 @@ import sys as _sys
 import textwrap as _textwrap
 
 from gettext import gettext as _, ngettext
-
-"""
-import logging as _logging
-_logging.basicConfig(filename='issue9338.log',level=_logging.DEBUG)
-
-def _log(*args):
-    pass
-_log = print
-def _log(*args):
-    #_logging.info(args)
-    try:
-        args = ' '+' '.join(['%s'%(x,) for x in args])
-    except AttributeError:
-        pass
-    _logging.info(args)
-"""
 
 SUPPRESS = '==SUPPRESS=='
 
@@ -595,12 +580,12 @@ class HelpFormatter(object):
     def _format_action_invocation(self, action):
         if not action.option_strings:
             default = self._get_default_metavar_for_positional(action)
-            metavar = action._metavar_formatter(default)(1)
-            if len(metavar)>1:
-                metavar = action.get_name()
-                # return _format_metavars(action, self)
-            else:
-                metavar = metavar[0]
+            metavar = action._metavar_formatter(default)()
+            #if len(metavar)>1:
+            #    metavar = action.get_name()
+            #    # return _format_tuple_metavar(action, self)
+            #else:
+            #    metavar = metavar[0]
             return metavar
 
         else:
@@ -720,19 +705,53 @@ class MetavarTypeHelpFormatter(HelpFormatter):
     def _get_default_metavar_for_positional(self, action):
         return action.type.__name__
 
+class CompactHelpFormatter(HelpFormatter):
+    """Help message formatter which uses a more compact optionals help line
+    Some users complain about the long help line when there are many option_strings
+    This produces
+        -b/--boo BOO
+    instead of
+        -b Boo  --boo BOO
 
+    Only the name of this class is considered a public API. All the methods
+    provided by the class are considered an implementation detail.
+    """
+
+    def _format_action_invocation(self, action):
+        if not action.option_strings:
+            default = self._get_default_metavar_for_positional(action)
+            return action._metavar_formatter(default)()
+            """
+            if len(metavar)>1:
+                metavar = action.get_name()
+                # return _format_tuple_metavar(action, self)
+            else:
+                metavar = metavar[0]
+            return metavar
+            """
+        else:
+            parts = []
+
+            # if the Optional doesn't take a value, format is:
+            #    -s/--long
+            if action.nargs == 0:
+                parts.append(action.get_name())
+
+            # if the Optional takes a value, format is:
+            #    -s/--long ARGS
+            else:
+                default = self._get_default_metavar_for_optional(action)
+                args_string = action._format_args(default)
+                option_string = action.get_name()
+                parts.append('%s %s' % (option_string, args_string))
+            return ', '.join(parts)
 
 # =====================
 # Options and Arguments
 # =====================
 
 def _get_action_name(argument):
-    if argument is None:
-        return None
-    else:
-        # move rest to this Action
-        return argument.get_name()
-
+    return None if argument is None else argument.get_name()
 
 class ArgumentError(Exception):
     """An error from creating or using an argument (optional or positional).
@@ -742,7 +761,7 @@ class ArgumentError(Exception):
     """
 
     def __init__(self, argument, message):
-        self.argument_name = _get_action_name(argument)
+        self.argument_name = None if argument is None else argument.get_name()
         self.message = message
 
     def __str__(self):
@@ -855,17 +874,18 @@ class Action(_AttributeHolder):
 
     def get_name(self, default_metavar=None):
         """
-        Action name, used by help formatting and error messages
-        The calling stack is not clean, but works for now
+        Action name, used in error messages
+        can also be used by help line formatter
         """
+        # optional
         if self.option_strings:
             return  '/'.join(self.option_strings)
         # positional
         metavar = self.metavar
-        if self.metavar not in (None, SUPPRESS):
+        if metavar not in (None, SUPPRESS):
             if isinstance(metavar, tuple):
                 # use a method to reduce a tuple to a string
-                return self._format_metavars() # 14704
+                return self._format_tuple_metavar() # 14704
             else:
                 return metavar
         elif self.dest not in (None, SUPPRESS):
@@ -952,20 +972,32 @@ class Action(_AttributeHolder):
         if self.metavar is not None:
             result = self.metavar
         elif self.choices is not None:
-            #choice_strs = [str(choice) for choice in self.choices]
-            #result = '{%s}' % ','.join(choice_strs)
             result = _format_choices(self.choices)
         else:
             result = default_metavar
 
-        def format(tuple_size):
-            if isinstance(result, tuple):
-                return result
+        def format(tuple_size=None):
+            if tuple_size is None:
+                if isinstance(result, tuple):
+                    # want one string for positional name
+                    return self.get_name(result)
+                    # ':'.join(result)
+                else:
+                    return result
             else:
-                return (result, ) * tuple_size
+                if isinstance(result, tuple):
+                    if len(result)==tuple_size:
+                        return result
+                    else:
+                        msg = 'length of metavar tuple does not match nargs'
+                        raise ValueError(msg)
+                else:
+                    return (result, ) * tuple_size
+
         return format
 
-    def _format_metavars(self, formatter=None):
+
+    def _format_tuple_metavar(self, formatter=None):
         # issue14074 - for positional, turn a tuple metavar into a
         # string that can be used for both help and error messages
         # some alternative versions
@@ -1322,7 +1354,7 @@ class _SubParsersAction(Action):
             getattr(namespace, _UNRECOGNIZED_ARGS_ATTR).extend(arg_strings)
 
     def name(self):
-        # custom name for _get_action_name()
+        # custom name for get_name()
         return "{%s}"%','.join(self._name_parser_map)
 
 # ==============
@@ -1544,6 +1576,7 @@ class _ActionsContainer(object):
                 #self._get_formatter()._format_args(action, None)
                 action._format_args(None)
             except TypeError:
+                # no test_argparse getting here
                 raise ValueError("length of metavar tuple does not match nargs")
 
         return self._add_action(action)
@@ -1941,6 +1974,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # check action arguments
         # focus on the arguments that the parent container does not know about
         # check nargs and metavar tuple
+        # move this to Action??
 
         # test for {m,n} rep; convert a (m,n) tuple if needed
         try:
@@ -1951,13 +1985,13 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             raise ArgumentError(action, str(e))
 
         try:
-            # self._get_formatter()._format_args(action, None)
             action._format_args(None)
         except (ValueError, AttributeError) as e:
             raise ArgumentError(action, str(e))
         except TypeError:
-            #raise ValueError("length of metavar tuple does not match nargs")
-            raise ArgumentError(action, "length of metavar tuple does not match nargs")
+            # no test_argparse getting here
+            msg = "length of metavar tuple does not match nargs"
+            raise ArgumentError(action, msg)
         #except TypeError as e: # 16468
         #    msg = _(str(e))
         #    if _re.search(r'argument(.*)format', msg):
@@ -2070,7 +2104,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 for conflict_action in action_conflicts.get(action, []):
                     if conflict_action in seen_non_default_actions:
                         msg = _('not allowed with argument %s')
-                        action_name = _get_action_name(conflict_action)
+                        action_name = conflict_action.get_name()
                         raise ArgumentError(action, msg % action_name)
 
             # take the action if we didn't receive a SUPPRESS value
@@ -2142,11 +2176,9 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
                     # if action takes a variable number of arguments, see
                     # if it needs to share any with remaining positionals
-                    #_log(action.dest, arg_count, selected_patterns, selected_patterns.count('O'))
                     if action._is_nargs_variable():
                         # variable range of args for this action
                         slots = self._match_arguments_partial([action]+positionals, selected_patterns)
-                        #_log('    opt+pos slots',slots)
                         shared_count = slots[0]
                     else:
                         shared_count = None
@@ -2156,9 +2188,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                     # but earlier ones (penult) might also
 
                     if shared_count is not None and selected_patterns.count('O')<=penult:
-                        # _log('    COUNTS:',arg_count, shared_count)
                         if arg_count>shared_count:
-                            #_log('    changing arg_count %s to shared_count %s'%(arg_count,shared_count))
                             arg_count = shared_count
 
                     stop = start + arg_count
@@ -2252,9 +2282,6 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
         penult = arg_strings_pattern.count('O') # # of 'O' in 'AOAA' patttern
         opt_actions = [v[0] for v in option_string_indices.values() if v[0]]
-        #_log(arg_strings_pattern, penult,
-        #    {'%s%s'%(v.dest,(v.nargs if v.nargs else '')) for v in opt_actions},
-        #    ['%s%s'%(k.dest,(k.nargs if k.nargs else '')) for k in positionals])
 
         _cnt = 0
         if self._is_nargs_variable(opt_actions) and positionals and penult>1:
@@ -2267,14 +2294,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 extras = consume_loop(True, ii)
                 _cnt += 1
                 if len(positionals)==0:
-                    #_log('  PENULT',ii, (extras if extras else ''), 'all pos matched')
                     break
-                else:
-                    pass
-                    #_log('  PENULT',ii,
-                    #    (extras if extras else ''), '%s pos left'%len(positionals))
-            if positionals:
-                pass #_log('  Positionals after penult')
         else:
             # don't need a test run; but do use action+positionals parsing
             ii = 0
@@ -2283,8 +2303,6 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         positionals = self._get_positional_actions()
         extras = consume_loop(False, ii)
         _cnt += 1
-        #_log('  II', _cnt, penult, arg_strings_pattern, extras, len(positionals))
-
 
         # make sure all required actions were present and also convert
         # action defaults which were not given as arguments
@@ -2292,7 +2310,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         for action in self._actions:
             if action not in seen_actions:
                 if action.required:
-                    required_actions.append(_get_action_name(action))
+                    required_actions.append(action.get_name())
                 else:
                     # Convert action default now instead of doing it before
                     # parsing arguments to avoid calling convert functions
@@ -2319,7 +2337,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
                 # if no actions were used, report the error
                 else:
-                    names = [_get_action_name(action)
+                    names = [action.get_name()
                              for action in group._group_actions
                              if action.help is not SUPPRESS]
                     names = ['%s'%name for name in names]
@@ -2327,7 +2345,6 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                     self.error(msg % ' '.join(names))
 
         # return the updated namespace and the extra arguments
-        #_log(namespace,extras)
         return namespace, extras
 
     def _read_args_from_files(self, arg_strings):
