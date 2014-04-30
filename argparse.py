@@ -2448,7 +2448,12 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             else:
                 value = arg_strings
             using_default = True
-            self._check_value(action, value)
+            if not isinstance(value, list):
+                self._check_value(action, value)
+            else:
+                for v in value:
+                    # issue9625 - check default values individually
+                    self._check_value(action, v)
 
         # single argument or optional argument produces a single value
         elif len(arg_strings) == 1 and action.nargs in [None, OPTIONAL]:
