@@ -201,6 +201,39 @@ def _format_choices(choices, expand=False, summarize=None):
         return rep
     return result
 
+# ways of handling the default for * positionals
+from functools import partial as _partial
+def _max_star_default(value, getfn, checkfn):
+    # maximal action
+    # do getfn if string; checkfn
+    def get_if_string(v):
+        # conditional in case _get_value (type) cannot handle
+        # non-string value
+        if isinstance(v, str):
+            return getfn(v)
+        else:
+            return v
+    if isinstance(value, (tuple, list)):
+        value = [get_if_string(v) for v in value]
+    checkfn(value)
+    return value
+def _min_star_default(value, getfn, checkfn):
+    # minimal action
+    # only my TestMultiChoices tests (3,4,5)fail (not raise error)
+    # this closer to handling of optionals, and '?'
+    return value
+_eval_star_default = _min_star_default
+
+"""
+# or make this regular with arg_strings = action.default
+# should default pass through _get_value?
+# p.add_argument('-f',nargs='*',default=['a',3],type=int)
+# does not pass default items through int
+# also does not pass it through choices
+# nargs='?' does not pass default throuh choices
+# why did positional * go through check_value in the first place?
+"""
+
 # ===============
 # Formatting Help
 # ===============
@@ -457,7 +490,7 @@ class HelpFormatter(object):
                         group_part = self._format_group_usage(group)
                         if group_part:
                             parts += group_part
-                    # could remove this group from further consideration
+                        # could remove this group from further consideration
                         i = end
                     break
             if group_part is None:
@@ -612,7 +645,6 @@ class HelpFormatter(object):
             if hasattr(params[name], '__name__'):
                 params[name] = params[name].__name__
         if params.get('choices') is not None:
-            #choices_str = ', '.join([str(c) for c in params['choices']])
             choices_str = _format_choices(params['choices'], expand=True)
             params['choices'] = choices_str
         return self._get_help_string(action) % params
@@ -1030,11 +1062,40 @@ class Action(_AttributeHolder):
                 # summarize is # choices exceeds this value
                 # is there a reasonable way of giving user control of this?
                 args = {'value': value,
-                        #'choices': ', '.join(map(repr, self.choices)),
                         'choices': _format_choices(choices, summarize=15),
                         }
                 msg = _('invalid choice: %(value)r (choose from %(choices)s)')
                 raise ArgumentError(self, msg % args)
+
+    def _check_values(self, values):
+        # issue16468 version
+        # converted value[s] must be one of the choices (if specified)
+        if self.choices is None:
+            return
+
+        choices = self.choices
+        if isinstance(choices, str):
+            # so 'in' does not find substrings
+            choices = list(choices)
+        if not isinstance(values,(tuple, list)):
+            values = (values,)
+        try:
+            problems = [value for value in values if value not in choices]
+        except Exception as e:
+            msg = _('invalid choice: %r, %s'%(value, e))
+            # e.g. None not in 'astring'
+            raise ArgumentError(self, msg)
+        if problems:
+            # summarize is # choices exceeds this value
+            # is there a reasonable way of giving user control of this?
+            #value = problems[0] # for now, just display 1st
+            args = {'value': ','.join([str(p) for p in problems]),
+                    'plural': 's' if len(problems)>1 else '',
+                    'choices': _format_choices(choices, summarize=15),
+                    }
+            msg = _('invalid choice%(plural)s: %(value)r (choose from %(choices)s)')
+            raise ArgumentError(self, msg % args)
+
 
     def _check_nargs(self):
        # check nargs and metavar tuple
@@ -2538,7 +2599,6 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 using_default = True
             if isinstance(value, str):
                 value = self._get_value(action, value)
-                # self._check_value(action, value)
                 action._check_value(value)
 
         # when nargs='*' on a positional, if there were no command-line
@@ -2548,16 +2608,23 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             if action.default is not None:
                 value = action.default
             else:
-                value = arg_strings
+                value = arg_strings # which is []
             using_default = True
-            #self._check_value(action, value)
-            action._check_value(value)
+            if isinstance(value, list):
+                # issue 9625, * with list default
+                value = [self._get_value(action, v) for v in value]
+                print(value)
+                for v in value:
+                    action._check_value(v)
+            else:
+                # prior code didn't have get_value here?
+                value = self._get_value(action, value)
+                action._check_value(value)
 
         # single argument or optional argument produces a single value
         elif len(arg_strings) == 1 and action.nargs in [None, OPTIONAL]:
             arg_string, = arg_strings
             value = self._get_value(action, arg_string)
-            #self._check_value(action, value)
             action._check_value(value)
 
         # REMAINDER arguments convert all values, checking none
@@ -2567,18 +2634,77 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # PARSER arguments convert all values, but check only the first
         elif action.nargs == PARSER:
             value = [self._get_value(action, v) for v in arg_strings]
-            #self._check_value(action, value[0])
             action._check_value(value[0])
 
         # all other types of nargs produce a list
         else:
             value = [self._get_value(action, v) for v in arg_strings]
             for v in value:
-                #self._check_value(action, v)
                 action._check_value(v)
 
         # return the converted value
         return value, using_default
+
+    def _get_values(self, action, arg_strings):
+        # for everything but PARSER, REMAINDER args, strip out first '--'
+        using_default = False
+        if action.nargs not in [PARSER, REMAINDER]:
+            try:
+                arg_strings.remove('--')
+            except ValueError:
+                pass
+
+        # optional argument produces a default when not present
+        if not arg_strings and action.nargs == OPTIONAL:
+            if action.option_strings:
+                value = action.const
+            else:
+                value = action.default
+                using_default = True
+            if isinstance(value, str):
+                value = self._get_value(action, value)
+                action._check_values(value)
+
+        # when nargs='*' on a positional, if there were no command-line
+        # args, use the default if it is anything other than None
+        elif (not arg_strings and action.nargs == ZERO_OR_MORE and
+              not action.option_strings):
+            if action.default is not None:
+                value = action.default
+            else:
+                value = arg_strings # []
+            using_default = True
+            value = _eval_star_default(value,
+                _partial(self._get_value, action),
+                action._check_values)
+
+
+
+        # single argument or optional argument produces a single value
+        elif len(arg_strings) == 1 and action.nargs in [None, OPTIONAL]:
+            arg_string, = arg_strings
+            value = self._get_value(action, arg_string)
+            action._check_values(value)
+
+        # REMAINDER arguments convert all values, checking none
+        elif action.nargs == REMAINDER:
+            value = [self._get_value(action, v) for v in arg_strings]
+
+        # PARSER arguments convert all values, but check only the first
+        elif action.nargs == PARSER:
+            value = [self._get_value(action, v) for v in arg_strings]
+            action._check_values(value[0])
+
+        # all other types of nargs produce a list
+        else:
+            value = [self._get_value(action, v) for v in arg_strings]
+            action._check_values(value)
+            #for v in value:
+            #    action._check_value(v)
+
+        # return the converted value
+        return value, using_default
+
 
     def _get_value(self, action, arg_string):
         type_func = self._registry_get('type', action.type, action.type)

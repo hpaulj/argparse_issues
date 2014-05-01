@@ -819,6 +819,43 @@ class TestPositionalsNargsZeroOrMoreDefault(ParserTestCase):
         ('a b', NS(foo=['a', 'b'])),
     ]
 
+class TestPositionalsNargsZeroOrMoreChoices(ParserTestCase):
+    """Test a Positional that specifies unlimited nargs with choices
+    """
+
+    argument_signatures = [Sig('foo', nargs='*', choices=['a', 'b', 'c'])]
+    failures = ['-x', 'spam']
+    successes = [
+        ('', NS(foo=[])),
+        ('a', NS(foo=['a'])),
+        ('a b', NS(foo=['a', 'b'])),
+    ]
+
+class TestPositionalsNargsZeroOrMoreChoicesDefault1(ParserTestCase):
+    """Test a Positional that specifies unlimited nargs with choices"""
+
+    argument_signatures = [Sig('foo', nargs='*',
+        choices=['a', 'b', 'c'], default='c')]
+    failures = ['-x', 'spam']
+    successes = [
+        ('', NS(foo='c')),
+        ('a', NS(foo=['a'])),
+        ('a b', NS(foo=['a', 'b'])),
+    ]
+
+class TestPositionalsNargsZeroOrMoreChoicesDefault2(ParserTestCase):
+    """Test a Positional that specifies unlimited nargs with choices
+    issue9625
+    """
+
+    argument_signatures = [Sig('foo', nargs='*',
+        choices=['a', 'b', 'c'], default=['a', 'b'])]
+    failures = ['-x', 'spam']
+    successes = [
+        ('', NS(foo=['a', 'b'])),
+        ('a', NS(foo=['a'])),
+        ('a b', NS(foo=['a', 'b'])),
+    ]
 
 class TestPositionalsNargsOneOrMore(ParserTestCase):
     """Test a Positional that specifies one or more nargs"""
@@ -830,6 +867,15 @@ class TestPositionalsNargsOneOrMore(ParserTestCase):
         ('a b', NS(foo=['a', 'b'])),
     ]
 
+class TestPositionalsNargsOneOrMoreChoices(ParserTestCase):
+    """Test a Positional that specifies one or more nargs with choices"""
+
+    argument_signatures = [Sig('foo', nargs='+', choices=['a', 'b', 'c'])]
+    failures = ['', '-x', 'spam']
+    successes = [
+        ('a', NS(foo=['a'])),
+        ('a b', NS(foo=['a', 'b'])),
+    ]
 
 class TestPositionalsNargsOptional(ParserTestCase):
     """Tests an Optional Positional"""
@@ -5864,6 +5910,59 @@ class TestMetavarWithParen(TestCase):
         #print(cm)
         self.assertRegex(cm, r'--foo range\(0,10\)  int from 0, 1, 2, 3, 4, 5, 6, 7, 8, 9')
 
+    def test_format_with_paren_errormsg(self):
+        "metavar has no effect on the choices error message - yet, issue18349"
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument("--foo", type=int, choices=range(20), metavar='range(0,20)')
+        self.assertEqual(parser.parse_args(['--foo','1']), NS(foo=1))
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args(['--foo','21'])
+        msg = str(cm.exception)
+        self.assertRegex(msg, 'invalid choice')
+        self.assertNotIn(msg, 'range\(0,20\)')
+
+    def test_format_with_paren_start(self):
+        "usage with a metavar that include (); ( at start of string"
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument("--foo", type=int, choices=range(20), metavar='(mid)post')
+        cm = parser.format_usage()
+        self.assertRegex(cm, r'usage: (.*) \[-h\] \[--foo \(mid\)post\]\n')
+
+    def test_format_with_metavar_with_comma(self):
+        "issue16360"
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument('-c', '--channel', metavar='CHANNEL[=LABEL],...',
+                    action='append', default=[], help='Channels to plot')
+        cm = parser.format_usage()
+        # 'usage: python3 -m unittest [-h] [-c CHANNEL[=LABEL],...]\n'
+        self.assertRegex(cm, r'usage: (.*) \[-h\] \[-c CHANNEL\[=LABEL\],...\]\n')
+
+    def test_format_with_suppress_mutually_exclusive_group(self):
+        "issue17890"
+        parser = ErrorRaisingArgumentParser()
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument('--spam', help=argparse.SUPPRESS)
+        parser.add_argument('--' + 'eggs' * 10, dest='eggs')
+        cm = parser.format_usage()
+        #
+        self.assertRegex(cm,
+            r'usage: (.*) \[-h\]\n                           \[--eggseggseggseggseggseggseggseggseggseggs EGGS\]\n')
+
+    def test_format_with_suppress_mutually_exclusive_group1(self):
+        "issue17890"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument('--spam', help=argparse.SUPPRESS)
+        eggs = '--'+ 'eggs' * 20
+        parser.add_argument(eggs, dest='eggs')
+        cm = parser.format_usage()
+        #
+        usage = """\
+        usage: PROG [-h]
+                    [%s EGGS]
+        """%eggs
+        self.assertEqual(cm, textwrap.dedent(usage))
+
 # ==========================
 # Non iterable choices
 # ==========================
@@ -5931,6 +6030,83 @@ class TestBareChoices(TestCase):
             parser.add_argument('--foo', type=int,choices=self.Bare())
         msg = str(cm.exception)
         self.assertRegex(msg, 'choices must support the in operator')
+
+class TestMultiChoices(TestCase):
+    # test when several values are not in choices
+    def test_1(self):
+        "string choices"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument('--foo', nargs='+', type=int,
+            choices=range(5), default=[0,11,2])
+        parser.add_argument('--bar', nargs='{1,3}', choices=['a','b','c'],
+            default = ['d','a','e'])
+        #print(parser.format_help())
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args(['--bar','e','a','d'])
+        msg = str(cm.exception)
+        self.assertRegex(msg, r"invalid choices")
+        self.assertRegex(msg, r"\'e,d\'")
+
+    """
+    help has
+    --foo {0,1,2,3,4} [{0,1,2,3,4} ...]
+    --bar {a,b,c}{1,3}
+    how about changing 1st to
+    --foo {0,1,2,3,4}+
+    --foo {0,1,2,3,4}{1,} has same effect
+
+
+    """
+
+    def test_2(self):
+        "int choices"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument('--foo', nargs='+', type=int,
+            choices=range(5), default=[0,11,2])
+        parser.add_argument('--bar', nargs='{1,3}', choices=['a','b','c'],
+            default = ['d','a','e'])
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args(['--foo','0','12','2','10'])
+        msg = str(cm.exception)
+        self.assertRegex(msg, r"invalid choices")
+        self.assertRegex(msg, r"\'12,10\'")
+
+    def test_3(self):
+        "test type conversion in positional default list"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument('foo', nargs='*', type=int,
+            choices=range(5),
+            default=['a','2','11'],
+            )
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args([])
+        msg = str(cm.exception)
+        self.assertRegex(msg, r"invalid int value: \'a\'")
+
+    def test_4(self):
+        "test * positional defaults with valid type"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument('foo', nargs='*', type=int,
+            choices=range(5),
+            default=['0',2,'11',12],
+            )
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args([])
+        msg = str(cm.exception)
+        self.assertRegex(msg, r"invalid choices: \'11,12\'")
+
+    def test_5(self):
+        "test defaults"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument('foo', nargs='*', type=int,
+            choices=range(5), default=[0,2])
+        parser.add_argument('bar', nargs='*', choices=['a','b','c'],
+            default = ['d','a','e'])
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args([])
+        msg = str(cm.exception)
+        self.assertRegex(msg, r"invalid choices: \'d,e\'")
+
 
 # ==========================
 # string choices
