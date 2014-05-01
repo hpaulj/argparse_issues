@@ -201,39 +201,6 @@ def _format_choices(choices, expand=False, summarize=None):
         return rep
     return result
 
-# ways of handling the default for * positionals
-from functools import partial as _partial
-def _max_star_default(value, getfn, checkfn):
-    # maximal action
-    # do getfn if string; checkfn
-    def get_if_string(v):
-        # conditional in case _get_value (type) cannot handle
-        # non-string value
-        if isinstance(v, str):
-            return getfn(v)
-        else:
-            return v
-    if isinstance(value, (tuple, list)):
-        value = [get_if_string(v) for v in value]
-    checkfn(value)
-    return value
-def _min_star_default(value, getfn, checkfn):
-    # minimal action
-    # only my TestMultiChoices tests (3,4,5)fail (not raise error)
-    # this closer to handling of optionals, and '?'
-    return value
-_eval_star_default = _min_star_default
-
-"""
-# or make this regular with arg_strings = action.default
-# should default pass through _get_value?
-# p.add_argument('-f',nargs='*',default=['a',3],type=int)
-# does not pass default items through int
-# also does not pass it through choices
-# nargs='?' does not pass default throuh choices
-# why did positional * go through check_value in the first place?
-"""
-
 # ===============
 # Formatting Help
 # ===============
@@ -2581,69 +2548,6 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
     # ========================
     # Value conversion methods
     # ========================
-    def _get_values(self, action, arg_strings):
-        # for everything but PARSER, REMAINDER args, strip out first '--'
-        using_default = False
-        if action.nargs not in [PARSER, REMAINDER]:
-            try:
-                arg_strings.remove('--')
-            except ValueError:
-                pass
-
-        # optional argument produces a default when not present
-        if not arg_strings and action.nargs == OPTIONAL:
-            if action.option_strings:
-                value = action.const
-            else:
-                value = action.default
-                using_default = True
-            if isinstance(value, str):
-                value = self._get_value(action, value)
-                action._check_value(value)
-
-        # when nargs='*' on a positional, if there were no command-line
-        # args, use the default if it is anything other than None
-        elif (not arg_strings and action.nargs == ZERO_OR_MORE and
-              not action.option_strings):
-            if action.default is not None:
-                value = action.default
-            else:
-                value = arg_strings # which is []
-            using_default = True
-            if isinstance(value, list):
-                # issue 9625, * with list default
-                value = [self._get_value(action, v) for v in value]
-                print(value)
-                for v in value:
-                    action._check_value(v)
-            else:
-                # prior code didn't have get_value here?
-                value = self._get_value(action, value)
-                action._check_value(value)
-
-        # single argument or optional argument produces a single value
-        elif len(arg_strings) == 1 and action.nargs in [None, OPTIONAL]:
-            arg_string, = arg_strings
-            value = self._get_value(action, arg_string)
-            action._check_value(value)
-
-        # REMAINDER arguments convert all values, checking none
-        elif action.nargs == REMAINDER:
-            value = [self._get_value(action, v) for v in arg_strings]
-
-        # PARSER arguments convert all values, but check only the first
-        elif action.nargs == PARSER:
-            value = [self._get_value(action, v) for v in arg_strings]
-            action._check_value(value[0])
-
-        # all other types of nargs produce a list
-        else:
-            value = [self._get_value(action, v) for v in arg_strings]
-            for v in value:
-                action._check_value(v)
-
-        # return the converted value
-        return value, using_default
 
     def _get_values(self, action, arg_strings):
         # for everything but PARSER, REMAINDER args, strip out first '--'
@@ -2674,11 +2578,11 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             else:
                 value = arg_strings # []
             using_default = True
-            value = _eval_star_default(value,
-                _partial(self._get_value, action),
-                action._check_values)
-
-
+            if isinstance(value, str):
+                action._check_values(value)
+            # minimal change from existing - check a string
+            # do nothing special with other values (most likely a list)
+            # see issue9625
 
         # single argument or optional argument produces a single value
         elif len(arg_strings) == 1 and action.nargs in [None, OPTIONAL]:
@@ -2699,8 +2603,6 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         else:
             value = [self._get_value(action, v) for v in arg_strings]
             action._check_values(value)
-            #for v in value:
-            #    action._check_value(v)
 
         # return the converted value
         return value, using_default
