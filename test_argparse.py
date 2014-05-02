@@ -5796,7 +5796,7 @@ class TestNargsRange2(ParserTestCase):
         ('1 2 3 4', NS(pos=[1,2,3], rest='4')),
         ('1 2 3 4 bar', NS(pos=[1,2,3,4], rest='bar')),
         ]
-    # # "usage: [-h] 'pos',{2,4}\n\npositional arguments:\n  pos\n\noptional arguments:\n  -h, --help  show this help message and exit\n"
+    # usage: [-h] 'pos',{2,4}\n\npositional arguments:\n  pos\n\noptional arguments:\n  -h, --help  show this help message and exit\n
 
 class TestNargsRange3(ParserTestCase):
     argument_signatures = [Sig('pos', nargs='{2,}', type=int)]
@@ -5822,8 +5822,53 @@ class TestNargsRange5(ParserTestCase):
         ('1 2', NS(pos=[1,2])),
         ]
 
+class TestNargsRange6(ParserTestCase):
+    # a range positional with other variable positional
+    argument_signatures = [Sig('foo', type=int),
+    Sig('range', nargs='{2,3}', type=int),
+    Sig('rest', nargs='+', type=int)]
+    failures = ['','1','1 2','1 2 3']
+    successes = [
+        ('1 2 3 4', NS(rest=[4], foo=1, range=[2,3])),
+        ('1 2 3 4 5', NS(rest=[5], foo=1, range=[2,3,4])),
+        ('1 2 3 4 5 6', NS(rest=[5,6], foo=1, range=[2,3,4])),
+        ]
 
+class TestNargsRange7(ParserTestCase):
+    # a range positional with other variable positional
+    # a custom action that checks range is not quite the same
+    class Custom(argparse.Action):
+        def __call__(self, parser, namespace, values, option_string=None):
+            if 2<=len(values)<=3:
+                setattr(namespace, self.dest, values)
+            else:
+                raise ArgumentParserError('not in range(2,3)')
+    argument_signatures = [Sig('foo', type=int),
+    Sig('range', nargs='+', type=int, action=Custom),
+    Sig('rest', nargs='+', type=int)]
+    failures = ['','1','1 2','1 2 3','1 2 3 4 5 6']
+    successes = [
+        ('1 2 3 4', NS(rest=[4], foo=1, range=[2,3])),
+        ('1 2 3 4 5', NS(rest=[5], foo=1, range=[2,3,4])),
+        ]
 
+class TestNargsRange1a(ParserTestCase):
+    # a custom action that checks range is not quite the same
+    class Custom(argparse.Action):
+        def __call__(self, parser, namespace, values, option_string=None):
+            if 2<=len(values)<=4:
+                setattr(namespace, self.dest, values)
+            else:
+                raise ArgumentParserError('not in range(2,3)')
+    argument_signatures = [Sig('pos', nargs='+', type=int, action=Custom),
+        Sig('rest', nargs='*')]
+    failures = ['1','1 2 3 4 bar']
+    successes = [
+        ('1 2', NS(pos=[1,2], rest=[])),
+        ('1 2 3', NS(pos=[1,2,3], rest=[])),
+        ('1 2 3 4', NS(pos=[1,2,3,4], rest=[])),
+        #('1 2 3 4 bar', NS(pos=[1,2,3,4], rest=['bar'])),
+        ]
 
 # ============================
 # from argparse import * tests

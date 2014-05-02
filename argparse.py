@@ -164,7 +164,8 @@ def _is_mnrep(nargs):
             nargs = nargs.replace('None','')
         else:
             raise ValueError('nargs tuple requires 2 integers')
-    m = _re.match('{(\d*),(\d*)}',nargs)
+    m = _re.match('{(\d*),?(\d*)}',nargs) # allow {n,m} or {n}
+    # can add nongreedy ? though it might not make much sense
     if m:
         try:
             x = _re.compile('[-A]%s'%nargs)
