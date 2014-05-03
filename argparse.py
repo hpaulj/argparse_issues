@@ -2024,7 +2024,13 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             # if we haven't hit the end of the command line strings,
             # then don't consume any final zero-width arguments yet
             # (we may need to parse some more optionals first)
+            """
             if start_index + sum(arg_counts) != len(arg_strings_pattern):
+                while arg_counts and arg_counts[-1] == 0:
+                    arg_counts.pop()
+            """
+            # alt 15112 test: test for optional in the remaining pattern
+            if 'O' in selected_pattern:
                 while arg_counts and arg_counts[-1] == 0:
                     arg_counts.pop()
 
