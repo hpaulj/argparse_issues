@@ -1964,6 +1964,46 @@ Exiting methods
    This method prints a usage message including the *message* to the
    standard error and terminates the program with a status code of 2.
 
+
+Intermixed parsing
+^^^^^^^^^^^^^^^^^^
+
+.. method:: ArgumentParser.parse_intermixed_args(args=None, namespace=None)
+.. method:: ArgumentParser.parse_known_intermixed_args(args=None, namespace=None)
+
+Some users expect to freely intermix optional and positional argument strings. For
+example, :mod:`optparse`, by default, allows interspersed argument strings.
+GNU :c:func:`getopt`
+permutes the argument strings so non-options are at the end.
+The  :meth:`~ArgumentParser.parse_intermixed_args` method emulates this behavior
+by first calling :meth:`~ArgumentParser.parse_known_args` with just the
+optional arguments being active.  It is then called a second time to parse the list
+of remaining argument strings using the positional arguments.
+
+:meth:`~ArgumentParser.parse_intermixed_args` raises an error if the
+parser uses features that are incompatible with this two step parsing.
+These include subparsers, ``argparse.REMAINDER``, and mutually exclusive
+groups that include both optionals and positionals.
+
+In this example, :meth:`~ArgumentParser.parse_known_args` returns an unparsed
+list of arguments `['2', '3']`, while :meth:`~ArgumentParser.parse_intermixed_args`
+returns `rest=[1, 2, 3]`.
+::
+
+   >>> parser = argparse.ArgumentParser()
+   >>> parser.add_argument('--foo')
+   >>> parser.add_argument('cmd')
+   >>> parser.add_argument('rest', nargs='*', type=int)
+   >>> parser.parse_known_args('cmd1 1 --foo bar 2 3'.split())
+   (Namespace(cmd='cmd1', foo='bar', rest=[1]), ['2', '3'])
+   >>> parser.parse_intermixed_args('cmd1 1 --foo bar 2 3'.split())
+   Namespace(cmd='cmd1', foo='bar', rest=[1, 2, 3])
+
+:meth:`~ArgumentParser.parse_known_intermixed_args` method, returns a
+two item tuple containing the populated namespace and the list of
+remaining argument strings.  :meth:`~ArgumentParser.parse_intermixed_args`
+raises an error if there are any remaining unparsed argument strings.
+
 .. _upgrading-optparse-code:
 
 Upgrading optparse code
@@ -2002,3 +2042,6 @@ A partial upgrade path from :mod:`optparse` to :mod:`argparse`:
 
 * Replace the OptionParser constructor ``version`` argument with a call to
   ``parser.add_argument('--version', action='version', version='<the version>')``
+
+* Use :meth:`~ArgumentParser.parse_intermixed_args` if
+  interspersing switches with command arguments is important.

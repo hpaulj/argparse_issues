@@ -610,6 +610,8 @@ class HelpFormatter(object):
             result = '%s ...' % get_metavar(1)
         elif _is_mnrep(action.nargs):
             result = '%s%s' % (get_metavar(1)[0], action.nargs)
+        elif action.nargs == SUPPRESS: # issue14191
+            result = ''
         else:
             if not isinstance(action.nargs, int):
                 valid_nargs = [None,OPTIONAL,ZERO_OR_MORE,ONE_OR_MORE,REMAINDER,PARSER]
@@ -2117,7 +2119,6 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         _cnt += 1
         _log('  II', _cnt, penult, arg_strings_pattern, extras, len(positionals))
 
-
         # make sure all required actions were present and also convert
         # action defaults which were not given as arguments
         required_actions = []
@@ -2392,6 +2393,10 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         elif _is_mnrep(nargs):
             nargs_pattern = '([-A]%s)'%nargs
 
+        # suppress action, like nargs=0
+        elif nargs == SUPPRESS:  # 14191
+            nargs_pattern = '(-*-*)'
+
         # all others should be integers
         else:
             if not isinstance(action.nargs, int):
@@ -2416,6 +2421,90 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             if _is_mnrep(action.nargs):
                 return True
             return False
+
+    # ========================
+    # Alt command line argument parsing, allowing free intermix
+    # ========================
+
+    def parse_intermixed_args(self, args=None, namespace=None):
+        args, argv = self.parse_known_intermixed_args(args, namespace)
+        if argv:
+            msg = _('unrecognized arguments: %s')
+            self.error(msg % ' '.join(argv))
+        return args
+
+    def parse_known_intermixed_args(self, args=None, namespace=None):
+        # self - argparse parser
+        # args, namespace - as used by parse_known_args
+        # returns a namespace and list of extras
+
+        # positional can be freely intermixed with optionals
+        # optionals are first parsed with all positional arguments deactivated
+        # the 'extras' are then parsed
+        # if parser definition is incompatible with the intermixed assumptions
+        # returns a TypeError (e.g. use of REMAINDER, subparsers)
+
+        # positionals are 'deactivated' by setting nargs and default to SUPPRESS.
+        # This blocks the addition of that positional to the namespace
+
+        positionals = self._get_positional_actions()
+        a = [action for action in positionals if action.nargs in [PARSER, REMAINDER]]
+        if a:
+            raise TypeError('parse_intermixed_args: positional arg with nargs=%s'%a[0].nargs)
+
+        if [action.dest for group in self._mutually_exclusive_groups
+            for action in group._group_actions if action in positionals]:
+            raise TypeError('parse_intermixed_args: positional in mutuallyExclusiveGroup')
+
+        save_usage = self.usage
+        try:
+            if self.usage is None:
+                # capture the full usage for use in error messages
+                self.usage = self.format_usage()[7:]
+            for action in positionals:
+                # deactivate positionals
+                action.save_nargs = action.nargs
+                # action.nargs = 0
+                action.nargs = SUPPRESS
+                action.save_default = action.default
+                action.default = SUPPRESS
+                # with 15112 change suppressed positionals might not be consumed
+                action.save_required = action.required
+                action.required = False
+            try:
+                namespace, remaining_args = self.parse_known_args(args, namespace)
+                for action in positionals:
+                    # remove the empty positional values from namespace
+                    if hasattr(namespace, action.dest) and getattr(namespace, action.dest)==[]:
+                        from warnings import warn
+                        warn('Do not expect %s in %s'%(action.dest,namespace))
+                        delattr(namespace, action.dest)
+            finally:
+                # restore nargs and usage before exiting
+                for action in positionals:
+                    action.nargs = action.save_nargs
+                    action.default = action.save_default
+                    action.required = action.save_required
+            # parse positionals
+            # optionals aren't normally required, but just in case, turn that off
+            optionals = self._get_optional_actions()
+            for action in optionals:
+                action.save_required = action.required
+                action.required = False
+            for group in self._mutually_exclusive_groups:
+                group.save_required = group.required
+                group.required = False
+            try:
+                namespace, extras = self.parse_known_args(remaining_args, namespace)
+            finally:
+                # restore parser values before exiting
+                for action in optionals:
+                    action.required = action.save_required
+                for group in self._mutually_exclusive_groups:
+                    group.required = group.save_required
+        finally:
+            self.usage = save_usage
+        return namespace, extras
 
     # ========================
     # Value conversion methods
@@ -2470,6 +2559,10 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         elif action.nargs == PARSER:
             value = [self._get_value(action, v) for v in arg_strings]
             self._check_value(action, value[0])
+
+        # SUPPRESS argument does not put anything in the namespace
+        elif action.nargs == SUPPRESS:
+            value = SUPPRESS
 
         # all other types of nargs produce a list
         else:
