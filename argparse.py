@@ -1551,6 +1551,9 @@ class _MutuallyExclusiveGroup(_ArgumentGroup):
         super(_MutuallyExclusiveGroup, self).__init__(container)
         self.required = required
         self._container = container
+        # register the test for this type of group
+        mytest = _MutuallyExclusiveGroup.test_mut_ex_groups
+        self.register('cross_tests', 'mxg', mytest)
 
     def _add_action(self, action):
         if action.required:
@@ -1564,6 +1567,31 @@ class _MutuallyExclusiveGroup(_ArgumentGroup):
         self._container._remove_action(action)
         self._group_actions.remove(action)
 
+    @staticmethod
+    def test_mut_ex_groups(parser, seen_non_default_actions, *vargs):
+        # alternative mutually_exclusive_groups test
+        # performed once at end of parse_args rather than with each entry
+        # the arguments listed in the error message may differ
+        # this gives a small speed improvement
+        # more importantly it is easier to customize and expand
+
+        seen_actions = set(seen_non_default_actions)
+
+        for group in parser._mutually_exclusive_groups:
+            group_actions = group._group_actions
+            group_seen = seen_actions.intersection(group_actions)
+            cnt = len(group_seen)
+            if cnt > 1:
+                msg = 'only one the arguments %s is allowed'
+            elif cnt == 0 and group.required:
+                msg = 'one of the arguments %s is required'
+            else:
+                msg = None
+            if msg:
+                names = [_get_action_name(action)
+                            for action in group_actions
+                            if action.help is not SUPPRESS]
+                parser.error(msg % ' '.join(names))
 
 class ArgumentParser(_AttributeHolder, _ActionsContainer):
     """Object for parsing command line strings into Python objects.
@@ -1622,6 +1650,10 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         def identity(string):
             return string
         self.register('type', None, identity)
+
+        # initialize cross_tests
+        # self.register('cross_tests', ?,?)
+        self._registries['cross_tests'] = {}
 
         # add help argument if necessary
         # (using explicit default to override global argument_default)
@@ -1757,17 +1789,6 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         if self.fromfile_prefix_chars is not None:
             arg_strings = self._read_args_from_files(arg_strings)
 
-        """
-        # map all mutually exclusive arguments to the other arguments
-        # they can't occur with
-        action_conflicts = {}
-        for mutex_group in self._mutually_exclusive_groups:
-            group_actions = mutex_group._group_actions
-            for i, mutex_action in enumerate(mutex_group._group_actions):
-                conflicts = action_conflicts.setdefault(mutex_action, [])
-                conflicts.extend(group_actions[:i])
-                conflicts.extend(group_actions[i + 1:])
-        """
         # find all option indices, and determine the arg_string_pattern
         # which has an 'O' if there is an option at an index,
         # an 'A' if there is an argument, or a '-' if there is a '--'
@@ -1798,7 +1819,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
         # converts arg strings to the appropriate and then takes the action
         seen_actions = set()
-        seen_non_default_actions = set()
+        seen_non_default_actions = [] # list to preserve repeats; set()
 
         def take_action(action, argument_strings, option_string=None):
             seen_actions.add(action)
@@ -1811,14 +1832,8 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             # action.default count as not-really-present
 
             if not using_default:
-                seen_non_default_actions.add(action)
-                """
-                for conflict_action in action_conflicts.get(action, []):
-                    if conflict_action in seen_non_default_actions:
-                        msg = _('not allowed with argument %s')
-                        action_name = _get_action_name(conflict_action)
-                        raise ArgumentError(action, msg % action_name)
-                """
+                seen_non_default_actions.append(action)
+
             # take the action if we didn't receive a SUPPRESS value
             # (e.g. from a default)
             if argument_values is not SUPPRESS:
@@ -1986,57 +2001,16 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                        ', '.join(required_actions))
 
         """
-        # make sure all required groups had one option present
-        for group in self._mutually_exclusive_groups:
-            if group.required:
-                for action in group._group_actions:
-                    if action in seen_non_default_actions:
-                        break
-
-                # if no actions were used, report the error
-                else:
-                    names = [_get_action_name(action)
-                             for action in group._group_actions
-                             if action.help is not SUPPRESS]
-                    msg = _('one of the arguments %s is required')
-                    self.error(msg % ' '.join(names))
+        remove required mutually_exclusive_groups test
         """
         # give user a hook to run more general tests on arguments
-        # for example that both --foo and --bar are in seen_non_default_actions
-        # parser.cross_tests is a list of functions
-        # here it includes a function that tests mutually_exclusive_groups
-        # others may be added
-        # its primary purpose is to give the user access to seen(_non_default)_actions
-        tests = getattr(self, 'cross_tests', [])
-        assert isinstance(tests, list), 'cross_tests must be a list of functions'
-        for testfn in tests:
+        # its primary purpose is to give the user access to seen_non_default_actions
+        # I can't think of a case where seen_actions is better - so omit
+        for testfn in self._get_cross_tests():
             testfn(self, seen_non_default_actions, seen_actions, namespace, extras)
+
         # return the updated namespace and the extra arguments
         return namespace, extras
-
-    #-------------
-    def test_mut_ex_groups(self, seen_non_default_actions, *vargs):
-        # alternative mutually_exclusive_groups test
-        # done once at end parse_args rather than with each entry
-        # small speed improvement
-        # error message may differ from original in the number and order of listed arguments
-
-        for group in self._mutually_exclusive_groups:
-            group_seen = seen_non_default_actions.intersection(group._group_actions)
-            cnt = len(group_seen)
-            if cnt > 1:
-                msg = 'only one the arguments %s is allowed'
-            elif cnt == 0 and group.required:
-                msg = 'one of the arguments %s is required'
-            else:
-                return
-            names = [_get_action_name(action)
-                        for action in group._group_actions
-                        if action.help is not SUPPRESS]
-            self.error(msg % ' '.join(names))
-
-    cross_tests = [test_mut_ex_groups]
-    #----------------
 
     def _read_args_from_files(self, arg_strings):
         # expand arguments referencing files
@@ -2246,6 +2220,26 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
         # return the pattern
         return nargs_pattern
+
+    def _get_cross_tests(self):
+        # fetch a list (possibly empty) of tests to be run at the end of parsing
+        # for example, the mutually_exclusive_group tests
+        # or user supplied tests
+
+        # this could be in a 'parser.cross_tests' attribute
+        # tests = getattr(self, 'cross_tests', [])
+        # but here I am looking in the _registries
+        # _registries is already shared among groups
+        # allowing me to define the group tests in the group class itself
+        # This use of _registries is slight non_standard since I am
+        # ignoring the 2nd level keys
+        tests = self._registries['cross_tests'].values()
+        return tests
+
+    def crosstest(self, func):
+        # decorator to facilitate adding these functions
+        name = func.__name__
+        self.register('cross_tests', name, func)
 
     # ========================
     # Value conversion methods
