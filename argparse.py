@@ -1757,6 +1757,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         if self.fromfile_prefix_chars is not None:
             arg_strings = self._read_args_from_files(arg_strings)
 
+        """
         # map all mutually exclusive arguments to the other arguments
         # they can't occur with
         action_conflicts = {}
@@ -1766,7 +1767,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 conflicts = action_conflicts.setdefault(mutex_action, [])
                 conflicts.extend(group_actions[:i])
                 conflicts.extend(group_actions[i + 1:])
-
+        """
         # find all option indices, and determine the arg_string_pattern
         # which has an 'O' if there is an option at an index,
         # an 'A' if there is an argument, or a '-' if there is a '--'
@@ -1811,12 +1812,13 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
             if not using_default:
                 seen_non_default_actions.add(action)
+                """
                 for conflict_action in action_conflicts.get(action, []):
                     if conflict_action in seen_non_default_actions:
                         msg = _('not allowed with argument %s')
                         action_name = _get_action_name(conflict_action)
                         raise ArgumentError(action, msg % action_name)
-
+                """
             # take the action if we didn't receive a SUPPRESS value
             # (e.g. from a default)
             if argument_values is not SUPPRESS:
@@ -1983,6 +1985,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             self.error(_('the following arguments are required: %s') %
                        ', '.join(required_actions))
 
+        """
         # make sure all required groups had one option present
         for group in self._mutually_exclusive_groups:
             if group.required:
@@ -1997,9 +2000,43 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                              if action.help is not SUPPRESS]
                     msg = _('one of the arguments %s is required')
                     self.error(msg % ' '.join(names))
-
+        """
+        # give user a hook to run more general tests on arguments
+        # for example that both --foo and --bar are in seen_non_default_actions
+        # parser.cross_tests is a list of functions
+        # here it includes a function that tests mutually_exclusive_groups
+        # others may be added
+        # its primary purpose is to give the user access to seen(_non_default)_actions
+        tests = getattr(self, 'cross_tests', [])
+        assert isinstance(tests, list), 'cross_tests must be a list of functions'
+        for testfn in tests:
+            testfn(self, seen_non_default_actions, seen_actions, namespace, extras)
         # return the updated namespace and the extra arguments
         return namespace, extras
+
+    #-------------
+    def test_mut_ex_groups(self, seen_non_default_actions, *vargs):
+        # alternative mutually_exclusive_groups test
+        # done once at end parse_args rather than with each entry
+        # small speed improvement
+        # error message may differ from original in the number and order of listed arguments
+
+        for group in self._mutually_exclusive_groups:
+            group_seen = seen_non_default_actions.intersection(group._group_actions)
+            cnt = len(group_seen)
+            if cnt > 1:
+                msg = 'only one the arguments %s is allowed'
+            elif cnt == 0 and group.required:
+                msg = 'one of the arguments %s is required'
+            else:
+                return
+            names = [_get_action_name(action)
+                        for action in group._group_actions
+                        if action.help is not SUPPRESS]
+            self.error(msg % ' '.join(names))
+
+    cross_tests = [test_mut_ex_groups]
+    #----------------
 
     def _read_args_from_files(self, arg_strings):
         # expand arguments referencing files
