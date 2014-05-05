@@ -1418,8 +1418,10 @@ class _ActionsContainer(object):
         # always required
         if kwargs.get('nargs') not in [OPTIONAL, ZERO_OR_MORE]:
             kwargs['required'] = True
-        if kwargs.get('nargs') == ZERO_OR_MORE and 'default' not in kwargs:
-            kwargs['required'] = True
+        #if kwargs.get('nargs') == ZERO_OR_MORE and 'default' not in kwargs:
+        #    kwargs['required'] = True
+        # I can't think of a reason for setting this true
+        # if default is None, this arg gets []
 
         # return the keyword arguments with no option strings
         return dict(kwargs, dest=dest, option_strings=[])
@@ -1828,9 +1830,6 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             # error if this argument is not allowed with other previously
             # seen arguments, assuming that actions that use the default
             # value don't really count as "present"
-            # refine test so that only values set by _get_values() to
-            # action.default count as not-really-present
-
             if not using_default:
                 seen_non_default_actions.append(action)
 
@@ -1981,7 +1980,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # action defaults which were not given as arguments
         required_actions = []
         for action in self._actions:
-            if action not in seen_actions:
+            if action not in seen_non_default_actions: #seen_actions:
                 if action.required:
                     required_actions.append(_get_action_name(action))
                 else:
@@ -2245,8 +2244,8 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
     # Value conversion methods
     # ========================
     def _get_values(self, action, arg_strings):
-        # for everything but PARSER, REMAINDER args, strip out first '--'
         using_default = False
+        # for everything but PARSER, REMAINDER args, strip out first '--'
         if action.nargs not in [PARSER, REMAINDER]:
             try:
                 arg_strings.remove('--')
@@ -2271,7 +2270,8 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             if action.default is not None:
                 value = action.default
             else:
-                value = arg_strings
+                value = arg_strings # clearer if value = []
+                assert value==[]
             using_default = True
             self._check_value(action, value)
 
