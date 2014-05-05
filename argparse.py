@@ -152,7 +152,7 @@ def _is_mnrep(nargs):
         else:
             msg = _('nargs tuple requires 2 integers')
             raise ValueError(msg)
-    m = _re.match('{(\d*),(\d*)}',nargs)
+    m = _re.match('{(\d*),?(\d*)}',nargs)
     if m:
         try:
             x = _re.compile('[-A]%s'%nargs)
@@ -924,6 +924,9 @@ class Action(_AttributeHolder):
         elif _is_mnrep(nargs):
             nargs_pattern = '([-A]%s)'%nargs
 
+        elif nargs == SUPPRESS: # 14191
+            nargs_pattern = '(-*-*)'
+
         # all others should be integers
         else:
             if not isinstance(self.nargs, int):
@@ -957,6 +960,9 @@ class Action(_AttributeHolder):
             result = '%s ...' % get_metavar(1)
         elif _is_mnrep(self.nargs):
             result = '%s%s' % (get_metavar(1)[0], self.nargs)
+        elif self.nargs == SUPPRESS:
+            result = ''
+
         else:
             if not isinstance(self.nargs, int):
                 valid_nargs = [None,OPTIONAL,ZERO_OR_MORE,ONE_OR_MORE,REMAINDER,PARSER]
@@ -2213,7 +2219,8 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             # if we haven't hit the end of the command line strings,
             # then don't consume any final zero-width arguments yet
             # (we may need to parse some more optionals first)
-            if start_index + sum(arg_counts) != len(arg_strings_pattern):
+            # if start_index + sum(arg_counts) != len(arg_strings_pattern):
+            if 'O' in selected_pattern: # better 15112 test
                 while arg_counts and arg_counts[-1] == 0:
                     arg_counts.pop()
 
@@ -2221,6 +2228,17 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             # and add the Positional and its args to the list
             for action, arg_count in zip(positionals, arg_counts):
                 args = arg_strings[start_index: start_index + arg_count]
+
+                if action.nargs not in [PARSER, REMAINDER]: # issue 13922
+                    pats = arg_strings_pattern[start_index: start_index + arg_count]
+                    # remove '--' corresponding to a '-' in pattern
+                    try:
+                        ii = pats.index('-')
+                        assert(args[ii]=='--')
+                        del args[ii]
+                    except ValueError:
+                        pass
+
                 start_index += arg_count
                 if not no_action:
                     take_action(action, args)
@@ -2552,11 +2570,12 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
     def _get_values(self, action, arg_strings):
         # for everything but PARSER, REMAINDER args, strip out first '--'
         using_default = False
-        if action.nargs not in [PARSER, REMAINDER]:
-            try:
-                arg_strings.remove('--')
-            except ValueError:
-                pass
+        # -- removed in comsume_positionals issue13922
+        #if action.nargs not in [PARSER, REMAINDER]:
+        #    try:
+        #        arg_strings.remove('--')
+        #    except ValueError:
+        #        pass
 
         # optional argument produces a default when not present
         if not arg_strings and action.nargs == OPTIONAL:
