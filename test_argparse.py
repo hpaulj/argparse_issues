@@ -110,6 +110,11 @@ def stderr_to_parser_error(parse_args, *args, **kwargs):
                     setattr(result, key, old_stdout)
                 if getattr(result, key) is sys.stderr:
                     setattr(result, key, old_stderr)
+                # try to correctly capture FileContext
+                if isinstance(getattr(result, key), argparse.FileContext.StdContext):
+                    if getattr(result, key) == sys.stdout:
+                        print('StdContext redirect',file=old_stdout)
+                        setattr(result, key, old_stdout)
             return result
         except SystemExit:
             code = sys.exc_info()[1].code
@@ -1666,6 +1671,152 @@ class TestTypeRegistration(TestCase):
         self.assertEqual(parser.parse_args('-x 1 42'.split()),
                          NS(x='my_type{1}', y='my_type{42}'))
 
+
+# ============
+# FileContext tests
+# ============
+
+
+class TestFileContextR(TempDirMixin, ParserTestCase):
+    """Test the FileContext option/argument type for reading files
+    with style=immediate, should be just like FileType
+    except sys.stdin is wrapped in a StdContext"""
+
+    def setUp(self):
+        super(TestFileContextR, self).setUp()
+        for file_name in ['foo', 'bar']:
+            file = open(os.path.join(self.temp_dir, file_name), 'w')
+            file.write(file_name)
+            file.close()
+        self.create_readonly_file('readonly')
+
+    argument_signatures = [
+        Sig('-x', type=argparse.FileContext(style='evaluate')),
+        Sig('spam', type=argparse.FileContext('r',style='evaluate')),
+    ]
+    failures = ['-x', '', 'non-existent-file.txt']
+    successes = [
+        ('foo', NS(x=None, spam=RFile('foo'))),
+        ('-x foo bar', NS(x=RFile('foo'), spam=RFile('bar'))),
+        ('bar -x foo', NS(x=RFile('foo'), spam=RFile('bar'))),
+        ('-x - -', NS(x=sys.stdin, spam=sys.stdin)),
+        ('readonly', NS(x=None, spam=RFile('readonly'))),
+    ]
+
+
+@unittest.skipIf(hasattr(os, 'geteuid') and os.geteuid() == 0,
+                 "non-root user required")
+class TestFileContextW(TempDirMixin, ParserTestCase):
+    """Test the FileContext option/argument type for writing files
+    stdout test requires a modification to stderr_to_parser_error
+    """
+
+    def setUp(self):
+        super(TestFileContextW, self).setUp()
+        self.create_readonly_file('readonly')
+
+    argument_signatures = [
+        Sig('-x', type=argparse.FileContext('w',style='evaluate')),
+        Sig('spam', type=argparse.FileContext('w',style='evaluate')),
+    ]
+    failures = ['-x', '', 'readonly']
+    successes = [
+        ('foo', NS(x=None, spam=WFile('foo'))),
+        ('-x foo bar', NS(x=WFile('foo'), spam=WFile('bar'))),
+        ('bar -x foo', NS(x=WFile('foo'), spam=WFile('bar'))),
+        ('-x - -', NS(x=sys.stdout, spam=sys.stdout)),
+    ]
+
+
+class RDFile(object):
+    seen = {}
+
+    def __init__(self, name):
+        self.name = name
+
+    def __eq__(self, other):
+        if other in self.seen:
+            text = self.seen[other]
+        else:
+            with other() as f:
+                # other is file opener wrapped in a partial
+                text = self.seen[other] = f.read()
+                other.name = f.name
+        if not isinstance(text, str):
+            text = text.decode('ascii')
+        return self.name == other.name == text
+
+
+class TestFileContextDelayedR(TempDirMixin, ParserTestCase):
+    """Test the FileContext option/argument type for reading files
+    with style=delayed.  Values in namespace will be a wrapped
+    file opener."""
+
+    def setUp(self):
+        super(TestFileContextDelayedR, self).setUp()
+        for file_name in ['foo', 'bar']:
+            file = open(os.path.join(self.temp_dir, file_name), 'w')
+            file.write(file_name)
+            file.close()
+        self.create_readonly_file('readonly')
+
+    argument_signatures = [
+        Sig('-x', type=argparse.FileContext(style='delayed')),
+        Sig('spam', type=argparse.FileContext('r',style='delayed')),
+    ]
+    failures = ['-x',
+                '',
+                #'non-existent-file.txt' # delayed does not do existence test
+                ]
+    successes = [
+        ('foo', NS(x=None, spam=RDFile('foo'))),
+        ('-x foo bar', NS(x=RDFile('foo'), spam=RDFile('bar'))),
+        ('bar -x foo', NS(x=RDFile('foo'), spam=RDFile('bar'))),
+        #('-x - -', NS(x=sys.stdin, spam=sys.stdin)),
+        ('readonly', NS(x=None, spam=RDFile('readonly'))),
+    ]
+
+class TestFileContext(TempDirMixin, TestCase):
+    """Test FileContext without the larger framework
+    Deals directly with the distinctive functions of this type
+    """
+
+    def setUp(self):
+        super(TestFileContext, self).setUp()
+        for file_name in ['foo', 'bar']:
+            file = open(os.path.join(self.temp_dir, file_name), 'w')
+            file.write(file_name)
+            file.close()
+        self.create_readonly_file('readonly')
+
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument('-x', type=argparse.FileContext(style='evaluate'))
+        parser.add_argument('spam', type=argparse.FileContext('r',style='delayed'))
+        self.parser = parser
+
+    def test1(self):
+        args = self.parser.parse_args('-x foo bar'.split())
+        print(args)
+        self.assertRaises(AttributeError, getattr, args.spam, 'name')
+        # args.spam is not an opened file
+        with args.spam() as f:
+            text = f.read()
+            print(text, f, f.closed)
+            self.assertEqual(text, f.name)
+        self.assertEqual(f.closed, True)
+        self.assertEqual(args.x.name, 'foo')
+        with args.x as f:
+            text = f.read()
+            print(text, f, f.closed)
+            self.assertEqual(text, f.name)
+        self.assertEqual(f.closed, True)
+
+    def test2(self):
+        args = self.parser.parse_args('-x - -'.split())
+        self.assertEqual(args.x, sys.stdin)
+        with args.spam() as f:
+            self.assertEqual(f, sys.stdin)
+        self.assertEqual(f.closed, False) # should not close stdin
 
 # ============
 # Action tests

@@ -67,6 +67,7 @@ __all__ = [
     'ArgumentError',
     'ArgumentTypeError',
     'FileType',
+    'FileContext',
     'HelpFormatter',
     'ArgumentDefaultsHelpFormatter',
     'RawDescriptionHelpFormatter',
@@ -1174,6 +1175,114 @@ class FileType(object):
     def __repr__(self):
         args = self._mode, self._bufsize
         kwargs = [('encoding', self._encoding), ('errors', self._errors)]
+        args_str = ', '.join([repr(arg) for arg in args if arg != -1] +
+                             ['%s=%r' % (kw, arg) for kw, arg in kwargs
+                              if arg is not None])
+        return '%s(%s)' % (type(self).__name__, args_str)
+
+from functools import partial as _partial
+class FileContext(object):
+    """
+    like FileType but with autoclose (if reasonable)
+    issue13824
+    meant to be used as
+    with args.input() as f: ...
+    3 modes?
+    - immediate open, essentially like FileType
+    - delayed open, ie to open file until use in 'with'
+    - checked, like delayed, but with immediate checks on file existience etc
+    sys.stdin/out options need some sort of cover so they can be used in context
+    i.e. they can't be open/closed
+    """
+    class StdContext(object):
+        # a class to wrap stdin/out;
+        # allows them to be used with 'with' but without closing
+        def __init__(self, stdfile):
+            self.file = stdfile
+            try:
+                self.name = self.file.name
+            except AttributeError:
+                self.name = self.file
+            print('__init__(%s)'%self.name)
+
+        def __enter__(self):
+            print('__enter__(%s)'%self.name)
+            return self.file
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            print('__exit__(%s)'%self.name)
+            # do nothing
+        def __eq__(self, other):
+            # for testing convenience - try to match on file, not context
+            if isinstance(other, type(self)):
+                return self.file == other.file
+            else:
+                return self.file == other
+        def __ne__(self, other):
+            return not (self == other)
+        def __repr__(self):
+            return 'StdContext(%r)'% self.file
+
+    def __init__(self, mode='r', bufsize=-1, encoding=None, errors=None, style='delayed'):
+        self._mode = mode
+        self._bufsize = bufsize
+        self._encoding = encoding
+        self._errors = errors
+        self._style = style
+
+    def __call__(self, string):
+        if self._style == 'delayed':
+            print('using delay call')
+            return self.__delay_call__(string)
+        elif self._style == 'immediate':
+            return self.__immediate_call__(string)
+        elif self._style == 'evaluate':
+            try:
+                return self.__delay_call__(string)()
+            except OSError as e:
+                message = _("can't open '%s': %s")
+                raise ArgumentTypeError(message % (string, e))
+
+    def __delay_call__(self, string):
+        # delayed mode
+        # the special argument "-" means sys.std{in,out}
+        if string == '-':
+            if 'r' in self._mode:
+                return _partial(self.StdContext, _sys.stdin)
+            elif 'w' in self._mode:
+                return _partial(self.StdContext, _sys.stdout)
+            else:
+                msg = _('argument "-" with mode %r') % self._mode
+                raise ValueError(msg)
+
+        # all other arguments are used as file names
+        fn = _partial(open,string, self._mode, self._bufsize, self._encoding,
+                        self._errors)
+        return fn
+
+    def __immediate_call__(self, string):
+        # as with FileType except wraps stdin/out
+        # the special argument "-" means sys.std{in,out}
+        if string == '-':
+            if 'r' in self._mode:
+                return self.StdContext(_sys.stdin)
+            elif 'w' in self._mode:
+                return self.StdContext(_sys.stdout)
+            else:
+                msg = _('argument "-" with mode %r') % self._mode
+                raise ValueError(msg)
+
+        # all other arguments are used as file names
+        try:
+            return open(string, self._mode, self._bufsize, self._encoding,
+                        self._errors)
+        except OSError as e:
+            message = _("can't open '%s': %s")
+            raise ArgumentTypeError(message % (string, e))
+
+    def __repr__(self):
+        args = self._mode, self._bufsize
+        kwargs = [('encoding', self._encoding), ('errors', self._errors), ('style', self._style)]
         args_str = ', '.join([repr(arg) for arg in args if arg != -1] +
                              ['%s=%r' % (kw, arg) for kw, arg in kwargs
                               if arg is not None])
