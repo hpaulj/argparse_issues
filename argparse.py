@@ -1702,8 +1702,10 @@ class _ActionsContainer(object):
         # always required
         if kwargs.get('nargs') not in [OPTIONAL, ZERO_OR_MORE]:
             kwargs['required'] = True
-        if kwargs.get('nargs') == ZERO_OR_MORE and 'default' not in kwargs:
-            kwargs['required'] = True
+        #if kwargs.get('nargs') == ZERO_OR_MORE and 'default' not in kwargs:
+        #    kwargs['required'] = True
+        # this change is required if seen_non_deault_actions is
+        # used for the required actions test.
 
         # make dest attribute-accessible, 'foo-bar' -> 'foo_bar'
         dest = dest.replace('-', '_')
@@ -1913,6 +1915,10 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             return string
         self.register('type', None, identity)
 
+        # initialize cross_tests
+        # self.register('cross_tests', ?,?)
+        self._registries['cross_tests'] = {}
+
         # add help argument if necessary
         # (using explicit default to override global argument_default)
         default_prefix = '-' if '-' in prefix_chars else prefix_chars[0]
@@ -2087,7 +2093,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
         # converts arg strings to the appropriate and then takes the action
         seen_actions = set()
-        seen_non_default_actions = set()
+        seen_non_default_actions = [] # set()
 
         def take_action(action, argument_strings, option_string=None):
             seen_actions.add(action)
@@ -2100,7 +2106,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             # action.default count as not-really-present
 
             if not using_default:
-                seen_non_default_actions.add(action)
+                seen_non_default_actions.append(action) #add(action)
                 for conflict_action in action_conflicts.get(action, []):
                     if conflict_action in seen_non_default_actions:
                         msg = _('not allowed with argument %s')
@@ -2320,7 +2326,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # action defaults which were not given as arguments
         required_actions = []
         for action in self._actions:
-            if action not in seen_actions:
+            if action not in seen_non_default_actions: # seen_actions:
                 if action.required:
                     required_actions.append(action.get_name())
                 else:
@@ -2355,6 +2361,12 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                     names = ['%s'%name for name in names]
                     msg = _('one of the arguments %s is required')
                     self.error(msg % ' '.join(names))
+
+        # give user a hook to run more general tests on arguments
+        # its primary purpose is to give the user access to seen_non_default_actions
+        # I can't think of a case where seen_actions is better - so omit
+        for testfn in self._get_cross_tests():
+            testfn(self, seen_non_default_actions, seen_actions, namespace, extras)
 
         # return the updated namespace and the extra arguments
         return namespace, extras
@@ -2562,6 +2574,27 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
     def _is_nargs_variable(self, actions):
         # return true if  any action in a list, takes variable number of args
         return any(a._is_nargs_variable() for a in actions)
+
+    def _get_cross_tests(self):
+        # fetch a list (possibly empty) of tests to be run at the end of parsing
+        # for example, the mutually_exclusive_group tests
+        # or user supplied tests
+        # issue11588
+
+        # this could be in a 'parser.cross_tests' attribute
+        # tests = getattr(self, 'cross_tests', [])
+        # but here I am looking in the _registries
+        # _registries is already shared among groups
+        # allowing me to define the group tests in the group class itself
+        # This use of _registries is slight non_standard since I am
+        # ignoring the 2nd level keys
+        tests = self._registries['cross_tests'].values()
+        return tests
+
+    def crosstest(self, func):
+        # decorator to facilitate adding these functions
+        name = func.__name__
+        self.register('cross_tests', name, func)
 
     # ========================
     # Value conversion methods
