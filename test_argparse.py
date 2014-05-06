@@ -110,10 +110,6 @@ def stderr_to_parser_error(parse_args, *args, **kwargs):
                     setattr(result, key, old_stdout)
                 if getattr(result, key) is sys.stderr:
                     setattr(result, key, old_stderr)
-                # try to correctly capture FileContext
-                if isinstance(getattr(result, key), argparse.FileContext.StdContext):
-                    if getattr(result, key) == sys.stdout:
-                        setattr(result, key, old_stdout)
             return result
         except SystemExit:
             code = sys.exc_info()[1].code
@@ -1456,6 +1452,31 @@ class RFile(object):
             text = text.decode('ascii')
         return self.name == other.name == text
 
+class FilenoMode(object):
+    # 14146 patch
+
+    def __init__(self, file, mode):
+        self.fileno = file.fileno()
+        self.mode = mode
+
+    def __eq__(self, other):
+        try:
+            other_fileno = other.fileno()
+        except OSError:
+            other_fileno = 1 # stdout
+            #print('fileno',self.fileno, other_fileno, file=sys.stderr)
+        try:
+            other_mode = other.mode
+        except AttributeError:
+            if type(other).__name__ == 'BytesIO':
+                other_mode = 'wb'
+            else:
+                other_mode = 'w' # expect StringIO
+        return self.fileno == other_fileno and self.mode == other_mode
+
+    def __repr__(self):
+        return "FilenoMode({}, {!r})".format(self.fileno, self.mode)
+
 
 class TestFileTypeR(TempDirMixin, ParserTestCase):
     """Test the FileType option/argument type for reading files"""
@@ -1478,6 +1499,7 @@ class TestFileTypeR(TempDirMixin, ParserTestCase):
         ('-x foo bar', NS(x=RFile('foo'), spam=RFile('bar'))),
         ('bar -x foo', NS(x=RFile('foo'), spam=RFile('bar'))),
         ('-x - -', NS(x=sys.stdin, spam=sys.stdin)),
+        ('-x - -', NS(x=FilenoMode(sys.stdin, 'r'), spam=FilenoMode(sys.stdin, 'r'))),
         ('readonly', NS(x=None, spam=RFile('readonly'))),
     ]
 
@@ -1496,7 +1518,6 @@ class TestFileTypeDefaults(TempDirMixin, ParserTestCase):
     failures = ['']
     # should not provoke error because default file is created
     successes = [('-c good', NS(c=RFile('good')))]
-
 
 class TestFileTypeRB(TempDirMixin, ParserTestCase):
     """Test the FileType option/argument type for reading files"""
@@ -1517,9 +1538,9 @@ class TestFileTypeRB(TempDirMixin, ParserTestCase):
         ('foo', NS(x=None, spam=RFile('foo'))),
         ('-x foo bar', NS(x=RFile('foo'), spam=RFile('bar'))),
         ('bar -x foo', NS(x=RFile('foo'), spam=RFile('bar'))),
-        ('-x - -', NS(x=sys.stdin, spam=sys.stdin)),
+        #('-x - -', NS(x=sys.stdin, spam=sys.stdin)),
+        ('-x - -', NS(x=FilenoMode(sys.stdin, 'rb'), spam=FilenoMode(sys.stdin, 'rb'))),
     ]
-
 
 class WFile(object):
     seen = set()
@@ -1557,9 +1578,11 @@ class TestFileTypeW(TempDirMixin, ParserTestCase):
         ('-x foo bar', NS(x=WFile('foo'), spam=WFile('bar'))),
         ('bar -x foo', NS(x=WFile('foo'), spam=WFile('bar'))),
         ('-x - -', NS(x=sys.stdout, spam=sys.stdout)),
+        ('-x - -', NS(x=FilenoMode(sys.stdout, 'w'), spam=FilenoMode(sys.stdout, 'w'))),
     ]
 
-
+from io import BytesIO
+@mock.patch('sys.stdout', BytesIO())
 class TestFileTypeWB(TempDirMixin, ParserTestCase):
 
     argument_signatures = [
@@ -1571,7 +1594,8 @@ class TestFileTypeWB(TempDirMixin, ParserTestCase):
         ('foo', NS(x=None, spam=WFile('foo'))),
         ('-x foo bar', NS(x=WFile('foo'), spam=WFile('bar'))),
         ('bar -x foo', NS(x=WFile('foo'), spam=WFile('bar'))),
-        ('-x - -', NS(x=sys.stdout, spam=sys.stdout)),
+        #('-x - -', NS(x=sys.stdout, spam=sys.stdout)),
+        ('-x - -', NS(x=FilenoMode(sys.stdout, 'wb'), spam=FilenoMode(sys.stdout, 'wb'))),
     ]
 
 
@@ -1675,10 +1699,27 @@ class TestTypeRegistration(TestCase):
 # FileContext tests
 # ============
 
+class IOFile(object):
+    """ object capable of recognizing an 'equivalent' io.TextIOWrapper
+    (or buffer equivalent?  io.BufferedReader)
+    """
+    def __init__(self, name):
+        self.name = name  # e.g. '<stdin>'
+
+    def __eq__(self, other):
+        oname = other.name
+        if oname == 0: oname = '<stdin>'
+        elif oname == 1: oname = '<stdout>'
+        return self.name == oname
+
+    def __repr__(self):
+        return "IOFile(%r)"%self.name
+
 class TestFileContextR(TempDirMixin, ParserTestCase):
     """Test the FileContext option/argument type for reading files
     with style=immediate, should be just like FileType
-    except sys.stdin is wrapped in a StdContext"""
+    except sys.stdin.fileno() is wrapped in a open
+    """
 
     def setUp(self):
         super(TestFileContextR, self).setUp()
@@ -1697,16 +1738,18 @@ class TestFileContextR(TempDirMixin, ParserTestCase):
         ('foo', NS(x=None, spam=RFile('foo'))),
         ('-x foo bar', NS(x=RFile('foo'), spam=RFile('bar'))),
         ('bar -x foo', NS(x=RFile('foo'), spam=RFile('bar'))),
-        ('-x - -', NS(x=sys.stdin, spam=sys.stdin)),
+        ('-x - -', NS(x=IOFile('<stdin>'), spam=IOFile('<stdin>'))),
         ('readonly', NS(x=None, spam=RFile('readonly'))),
     ]
-
 
 @unittest.skipIf(hasattr(os, 'geteuid') and os.geteuid() == 0,
                  "non-root user required")
 class TestFileContextW(TempDirMixin, ParserTestCase):
     """Test the FileContext option/argument type for writing files
     stdout test requires a modification to stderr_to_parser_error
+
+    stdout is redirected to StdIOBuffer, which cannot be wrapped in a
+    delayed partial open (it does not havea fileno())
     """
 
     def setUp(self):
@@ -1722,31 +1765,44 @@ class TestFileContextW(TempDirMixin, ParserTestCase):
         ('foo', NS(x=None, spam=WFile('foo'))),
         ('-x foo bar', NS(x=WFile('foo'), spam=WFile('bar'))),
         ('bar -x foo', NS(x=WFile('foo'), spam=WFile('bar'))),
-        ('-x - -', NS(x=sys.stdout, spam=sys.stdout)),
+        #('-x - -', NS(x=IOFile('<stdout>'), spam=IOFile('<stdout>'))),
+        # error: argument -x: Cannot wrap <test_argparse.StdIOBuffer object at 0xb6d6ec34> in delayed open\n'
     ]
 
 
 class RDFile(object):
     # object capable of recognizing an 'equivalent' FileContext object
+    # modeled on WFile (above)
     seen = {}
 
-    def __init__(self, name):
+    def __init__(self, name, mode=None):
         self.name = name
+        self.mode = mode
 
     def __eq__(self, other):
         if other in self.seen:
             text = self.seen[other]
+            # mode
         else:
+            # order.args = (name,) or (0,)
             with other() as f:
                 # other is file opener wrapped in a partial
+                # that is meant to be executed with 'with'
                 other.name = f.name
+                other.mode = f.mode
                 if other.name == '<stdin>':
                     # do not attempt to read from stdin
+                    text = self.seen[other] = other.name
+                elif other.name == 0: # stdin.fileno()
+                    # do not attempt to read from stdin
+                    other.name = '<stdin>'
                     text = self.seen[other] = other.name
                 else:
                     text = self.seen[other] = f.read()
         if not isinstance(text, str):
             text = text.decode('ascii')
+        if self.mode and self.mode != other.mode:
+            return False
         return self.name == other.name == text
 
     def __repr__(self):
@@ -1768,17 +1824,22 @@ class TestFileContextDelayedR(TempDirMixin, ParserTestCase):
     argument_signatures = [
         Sig('-x', type=argparse.FileContext(style='delayed')),
         Sig('spam', type=argparse.FileContext('r',style='delayed')),
+        Sig('-d', type=argparse.FileContext('rb', style='delayed')),
     ]
     failures = ['-x',
                 '',
                 # 'non-existent-file.txt', # delayed does not do existence test
                 ]
     successes = [
-        ('foo', NS(x=None, spam=RDFile('foo'))),
-        ('-x foo bar', NS(x=RDFile('foo'), spam=RDFile('bar'))),
-        ('bar -x foo', NS(x=RDFile('foo'), spam=RDFile('bar'))),
-        ('-x - -', NS(x=RDFile('<stdin>'), spam=RDFile('<stdin>'))),
-        ('readonly', NS(x=None, spam=RDFile('readonly'))),
+        ('foo', NS(x=None, spam=RDFile('foo'), d=None)),
+        ('-x foo bar', NS(x=RDFile('foo'), spam=RDFile('bar'), d=None)),
+        ('bar -x foo', NS(x=RDFile('foo'), spam=RDFile('bar'), d=None)),
+        ('-x - -', NS(x=RDFile('<stdin>'), spam=RDFile('<stdin>'), d=None)),
+        ('readonly', NS(x=None, spam=RDFile('readonly'), d=None)),
+        ('-d foo bar', NS(x=None, spam=RDFile('bar'), d=RDFile('foo', mode='rb'))),
+        ('-x foo readonly -d bar', NS(x=RDFile('foo', mode='r'),
+                                      spam=RDFile('readonly'),
+                                      d=RDFile('bar', mode='rb'))),
     ]
 
 class TestFileContextAccessR(TempDirMixin, ParserTestCase):
@@ -1822,14 +1883,13 @@ class TestFileContext(TempDirMixin, TestCase):
             file.write(file_name)
             file.close()
         self.create_readonly_file('readonly')
-
         parser = ErrorRaisingArgumentParser()
         parser.add_argument('-x', type=argparse.FileContext(style='evaluate'))
-        parser.add_argument('spam', type=argparse.FileContext('r',style='delayed'))
+        parser.add_argument('-s', '--spam', type=argparse.FileContext('r',style='delayed'))
         self.parser = parser
 
     def test1(self):
-        args = self.parser.parse_args('-x foo bar'.split())
+        args = self.parser.parse_args('-x foo -s bar'.split())
         self.assertRaises(AttributeError, getattr, args.spam, 'name')
         # args.spam is not an opened file
         with args.spam() as f:
@@ -1843,11 +1903,58 @@ class TestFileContext(TempDirMixin, TestCase):
         self.assertEqual(f.closed, True)
 
     def test2(self):
-        args = self.parser.parse_args('-x - -'.split())
-        self.assertEqual(args.x, sys.stdin)
-        with args.spam() as f:
-            self.assertEqual(f, sys.stdin)
-        self.assertEqual(f.closed, False) # should not close stdin
+        args = self.parser.parse_args('-x - -s -'.split())
+        self.assertEqual(args.x, IOFile('<stdin>'))
+        # self.assertEqual(args.spam, RDFile('<stdin>'))
+        with args.spam() as f: # equivalent
+            self.assertEqual(f, IOFile('<stdin>'))
+        self.assertEqual(sys.stdin.closed, False)
+
+class TestFileContextB(TempDirMixin, TestCase):
+    """Test FileContext without the larger framework
+    Deals directly with the distinctive functions of this type
+    tests redirecting stdin/out, without
+    uses FileContext that provides stdin/out keyword args
+    """
+
+    def setUp(self):
+        super(TestFileContextB, self).setUp()
+
+        parser = ErrorRaisingArgumentParser()
+        self.text1 = 'test'
+        self.in1 = StringIO(self.text1)
+        self.out1 = StringIO()
+        parser.add_argument('--in1', type=argparse.FileContext('r',style='delayed',stdin=self.in1))
+        parser.add_argument('--out1', type=argparse.FileContext('w',style='delayed',stdout=self.out1))
+        self.text2 = b'btest'
+        self.in2 = BytesIO(self.text2)
+        self.out2 = BytesIO()
+        parser.add_argument('--in2', type=argparse.FileContext('rb',style='delayed',stdin=self.in2))
+        parser.add_argument('--out2', type=argparse.FileContext('wb',style='delayed',stdout=self.out2))
+        self.parser = parser
+
+    def test1(self):
+        args = self.parser.parse_args('--in1 - --out1 -'.split())
+        #print(args, file=sys.stderr)
+        with args.in1() as in1, args.out1() as out1:
+                text = in1.getvalue()
+                #print(text,file=sys.stderr)
+                out1.write(text)
+                #print(out1.getvalue(),file=sys.stderr)
+                self.assertEqual(self.text1, text)
+                self.assertEqual(self.text1, out1.getvalue())
+
+    def test2(self):
+        # test b mode
+        args = self.parser.parse_args('--in2 - --out2 -'.split())
+        #print(args, file=sys.stderr)
+        with args.in2() as in2, args.out2() as out2:
+                text = in2.getvalue()
+                #print(text,file=sys.stderr)
+                out2.write(text)
+                #print(out2.getvalue(),file=sys.stderr)
+                self.assertEqual(self.text2, text)
+                self.assertEqual(self.text2, out2.getvalue())
 
 # ============
 # Action tests

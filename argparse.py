@@ -1157,13 +1157,23 @@ class FileType(object):
         # the special argument "-" means sys.std{in,out}
         if string == '-':
             if 'r' in self._mode:
-                return _sys.stdin
+                file = _sys.stdin
             elif 'w' in self._mode:
-                return _sys.stdout
+                file = _sys.stdout
             else:
                 msg = _('argument "-" with mode %r') % self._mode
                 raise ValueError(msg)
-
+            if 'b' in self._mode:
+                # addition to handle 'b' mode
+                try:
+                    return open(file.fileno(), self._mode, self._bufsize, self._encoding,
+                        self._errors, closefd=False)
+                except OSError:
+                    # assume 'file' is something like StringIO that does not
+                    # have a fileno.  Simply return it then.
+                    return file
+            else:
+                return file
         # all other arguments are used as file names
         try:
             return open(string, self._mode, self._bufsize, self._encoding,
@@ -1181,57 +1191,33 @@ class FileType(object):
         return '%s(%s)' % (type(self).__name__, args_str)
 
 from functools import partial as _partial
+
 class FileContext(object):
     """
     like FileType but with autoclose (if reasonable)
+    basically wraps the file spec in a partial open
     issue13824
     meant to be used as
     with args.input() as f: ...
-    3 modes?
-    - immediate open, essentially like FileType
-    - delayed open, ie to open file until use in 'with'
-    - checked, like delayed, but with immediate checks on file existience etc
-    sys.stdin/out options need some sort of cover so they can be used in context
-    without being closed
+    3 styles:
+    - delayed: delayed open, ie to open file until use in 'with'
+    - test: checked, like delayed, but with immediate checks on file existience etc
+    - evaluate:immediate open, essentially like FileType
+    use closefd=False with sys.stdin/out
     """
-    class StdContext(object):
-        # a class meant to wrap stdin/out;
-        # allows them to be used with 'with' but without being closed
-        def __init__(self, stdfile):
-            self.file = stdfile
-            try:
-                self.name = self.file.name
-            except AttributeError:
-                self.name = self.file
 
-        def __enter__(self):
-            return self.file
-
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            pass
-
-        def __eq__(self, other):
-            # match on the file rather the context
-            if isinstance(other, type(self)):
-                return self.file == other.file
-            else:
-                return self.file == other
-
-        def __ne__(self, other):
-            return not (self == other)
-
-        def __repr__(self):
-            return 'StdContext(%r)'% self.file
-
-    def __init__(self, mode='r', bufsize=-1, encoding=None, errors=None, style='delayed'):
+    def __init__(self, mode='r', bufsize=-1, encoding=None, errors=None, style='delayed',
+        stdin=_sys.stdin, stdout=_sys.stdout):
         self._mode = mode
         self._bufsize = bufsize
         self._encoding = encoding
         self._errors = errors
         self._style = style
+        self.stdin = stdin
+        self.stdout = stdout
 
     def _ostest(self, string):
-        # os.access to test this string
+        # use os.access to test this string
         # raise error if problem
         if string != '-':
             if 'r' in self._mode:
@@ -1243,12 +1229,31 @@ class FileContext(object):
             if 'w' in self._mode:
                 dir = _os.path.dirname(string) or '.'
                 if _os.access(string, _os.W_OK):
+                    #print('string WOK')
                     pass
                 elif _os.access(dir, _os.W_OK):
+                    #print('dir WOK')
                     pass
                 else:
                     message = _("can't open '%s' for write")
                     raise ArgumentTypeError(message % (string,))
+                # also test that 'string' is not a directory
+                try:
+                    import stat
+                    mode = _os.stat(string).st_mode
+                    if stat.S_ISDIR(mode):
+                        # It's a directory
+                        message = _("can't open '%s' for write, it is a dir")
+                        raise ArgumentTypeError(message % (string,))
+                    elif stat.S_ISREG(mode):
+                        # It's a file
+                        pass
+                    else:
+                        # Unknown file type, print a message
+                        message = _("can't open '%s' for write, it is an unknown file type")
+                        raise ArgumentTypeError(message % (string,))
+                except FileNotFoundError:
+                    pass
         return string
 
     def __call__(self, string):
@@ -1268,20 +1273,34 @@ class FileContext(object):
             result = self.__delay_call__(string)
             return result
         else:
-            raise ArgumentTypeError('Unknown FIleContext style')
+            raise ArgumentTypeError('Unknown FileContext style')
 
     def __delay_call__(self, string):
         # delayed mode
+        # like FileType.__call__ except opening is wrapped in a partial
+        closefd = True
         if string == '-':
             if 'r' in self._mode:
-                return _partial(self.StdContext, _sys.stdin)
+                file = self.stdin
             elif 'w' in self._mode:
-                return _partial(self.StdContext, _sys.stdout)
+                file = self.stdout
             else:
                 msg = _('argument "-" with mode %r') % self._mode
-                raise ValueError(msg)
-        fn = _partial(open,string, self._mode, self._bufsize, self._encoding,
-                        self._errors)
+                #raise ValueError(msg)
+                raise ArgumentTypeError(msg)
+            try:
+                # here pass both 'b' and non through fileno and partial
+                file = file.fileno()
+                closefd = False
+            except OSError:
+                # file is probably StringIO() that does not have fileno()
+                # simply return it wraped in a partial
+                return _partial(lambda file:file, file)
+        else:
+            file = string
+        fn = _partial(open, file, mode=self._mode,
+                      buffering=self._bufsize, encoding=self._encoding,
+                      errors=self._errors, closefd=closefd)
         return fn
 
     def __repr__(self):
@@ -1291,6 +1310,7 @@ class FileContext(object):
                              ['%s=%r' % (kw, arg) for kw, arg in kwargs
                               if arg is not None])
         return '%s(%s)' % (type(self).__name__, args_str)
+
 
 # ===========================
 # Optional and Positional Parsing
