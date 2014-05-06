@@ -1192,34 +1192,34 @@ class FileContext(object):
     - delayed open, ie to open file until use in 'with'
     - checked, like delayed, but with immediate checks on file existience etc
     sys.stdin/out options need some sort of cover so they can be used in context
-    i.e. they can't be open/closed
+    without being closed
     """
     class StdContext(object):
-        # a class to wrap stdin/out;
-        # allows them to be used with 'with' but without closing
+        # a class meant to wrap stdin/out;
+        # allows them to be used with 'with' but without being closed
         def __init__(self, stdfile):
             self.file = stdfile
             try:
                 self.name = self.file.name
             except AttributeError:
                 self.name = self.file
-            print('__init__(%s)'%self.name)
 
         def __enter__(self):
-            print('__enter__(%s)'%self.name)
             return self.file
 
         def __exit__(self, exc_type, exc_val, exc_tb):
-            print('__exit__(%s)'%self.name)
-            # do nothing
+            pass
+
         def __eq__(self, other):
-            # for testing convenience - try to match on file, not context
+            # match on the file rather the context
             if isinstance(other, type(self)):
                 return self.file == other.file
             else:
                 return self.file == other
+
         def __ne__(self, other):
             return not (self == other)
+
         def __repr__(self):
             return 'StdContext(%r)'% self.file
 
@@ -1236,18 +1236,16 @@ class FileContext(object):
         if string != '-':
             if 'r' in self._mode:
                 if _os.access(string, _os.R_OK):
-                    print('os read ok',string)
+                    pass
                 else:
                     message = _("can't open '%s' for read")
                     raise ArgumentTypeError(message % (string,))
             if 'w' in self._mode:
                 dir = _os.path.dirname(string) or '.'
-                #if not dir: dir = '.'
-                print('dir',dir)
                 if _os.access(string, _os.W_OK):
-                    print('os write ok',string)
+                    pass
                 elif _os.access(dir, _os.W_OK):
-                    print('os write dir ok', dir)
+                    pass
                 else:
                     message = _("can't open '%s' for write")
                     raise ArgumentTypeError(message % (string,))
@@ -1256,11 +1254,11 @@ class FileContext(object):
     def __call__(self, string):
         if self._style == 'delayed':
             return self.__delay_call__(string)
-        if self._style == 'immediate':
-            return self.__immediate_call__(string)
         elif self._style == 'evaluate':
+            # evaluate the delayed result right away
             try:
-                return self.__delay_call__(string)()
+                result = self.__delay_call__(string)
+                return result()
             except OSError as e:
                 message = _("can't open '%s': %s")
                 raise ArgumentTypeError(message % (string, e))
@@ -1268,24 +1266,12 @@ class FileContext(object):
             # test before returning a 'delayed' object
             string = self._ostest(string)
             result = self.__delay_call__(string)
-            """
-            if 'r' in self._mode:
-                # alt read test
-                try:
-                    with result() as f:
-                        print('%s tests ok'%f.name)
-                        pass
-                except OSError as e:
-                    message = _("can't open '%s': %s")
-                    raise ArgumentTypeError(message % (string, e))
-            """
             return result
         else:
             raise ArgumentTypeError('Unknown FIleContext style')
 
     def __delay_call__(self, string):
         # delayed mode
-        # the special argument "-" means sys.std{in,out}
         if string == '-':
             if 'r' in self._mode:
                 return _partial(self.StdContext, _sys.stdin)
@@ -1294,31 +1280,9 @@ class FileContext(object):
             else:
                 msg = _('argument "-" with mode %r') % self._mode
                 raise ValueError(msg)
-
-        # all other arguments are used as file names
         fn = _partial(open,string, self._mode, self._bufsize, self._encoding,
                         self._errors)
         return fn
-
-    def __immediate_call__(self, string):
-        # as with FileType except wraps stdin/out
-        # the special argument "-" means sys.std{in,out}
-        if string == '-':
-            if 'r' in self._mode:
-                return self.StdContext(_sys.stdin)
-            elif 'w' in self._mode:
-                return self.StdContext(_sys.stdout)
-            else:
-                msg = _('argument "-" with mode %r') % self._mode
-                raise ValueError(msg)
-
-        # all other arguments are used as file names
-        try:
-            return open(string, self._mode, self._bufsize, self._encoding,
-                        self._errors)
-        except OSError as e:
-            message = _("can't open '%s': %s")
-            raise ArgumentTypeError(message % (string, e))
 
     def __repr__(self):
         args = self._mode, self._bufsize

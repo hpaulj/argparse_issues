@@ -113,7 +113,6 @@ def stderr_to_parser_error(parse_args, *args, **kwargs):
                 # try to correctly capture FileContext
                 if isinstance(getattr(result, key), argparse.FileContext.StdContext):
                     if getattr(result, key) == sys.stdout:
-                        print('StdContext redirect',file=old_stdout)
                         setattr(result, key, old_stdout)
             return result
         except SystemExit:
@@ -1676,7 +1675,6 @@ class TestTypeRegistration(TestCase):
 # FileContext tests
 # ============
 
-
 class TestFileContextR(TempDirMixin, ParserTestCase):
     """Test the FileContext option/argument type for reading files
     with style=immediate, should be just like FileType
@@ -1747,13 +1745,12 @@ class RDFile(object):
                     text = self.seen[other] = other.name
                 else:
                     text = self.seen[other] = f.read()
-
         if not isinstance(text, str):
             text = text.decode('ascii')
         return self.name == other.name == text
+
     def __repr__(self):
         return "RDFile(%r)"%self.name
-
 
 class TestFileContextDelayedR(TempDirMixin, ParserTestCase):
     """Test the FileContext option/argument type for reading files
@@ -1833,18 +1830,15 @@ class TestFileContext(TempDirMixin, TestCase):
 
     def test1(self):
         args = self.parser.parse_args('-x foo bar'.split())
-        print(args)
         self.assertRaises(AttributeError, getattr, args.spam, 'name')
         # args.spam is not an opened file
         with args.spam() as f:
             text = f.read()
-            print(text, f, f.closed)
             self.assertEqual(text, f.name)
         self.assertEqual(f.closed, True)
         self.assertEqual(args.x.name, 'foo')
         with args.x as f:
             text = f.read()
-            print(text, f, f.closed)
             self.assertEqual(text, f.name)
         self.assertEqual(f.closed, True)
 
