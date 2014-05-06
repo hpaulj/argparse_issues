@@ -1230,11 +1230,33 @@ class FileContext(object):
         self._errors = errors
         self._style = style
 
+    def _ostest(self, string):
+        # os.access to test this string
+        # raise error if problem
+        if string != '-':
+            if 'r' in self._mode:
+                if _os.access(string, _os.R_OK):
+                    print('os read ok',string)
+                else:
+                    message = _("can't open '%s' for read")
+                    raise ArgumentTypeError(message % (string,))
+            if 'w' in self._mode:
+                dir = _os.path.dirname(string) or '.'
+                #if not dir: dir = '.'
+                print('dir',dir)
+                if _os.access(string, _os.W_OK):
+                    print('os write ok',string)
+                elif _os.access(dir, _os.W_OK):
+                    print('os write dir ok', dir)
+                else:
+                    message = _("can't open '%s' for write")
+                    raise ArgumentTypeError(message % (string,))
+        return string
+
     def __call__(self, string):
         if self._style == 'delayed':
-            print('using delay call')
             return self.__delay_call__(string)
-        elif self._style == 'immediate':
+        if self._style == 'immediate':
             return self.__immediate_call__(string)
         elif self._style == 'evaluate':
             try:
@@ -1242,6 +1264,24 @@ class FileContext(object):
             except OSError as e:
                 message = _("can't open '%s': %s")
                 raise ArgumentTypeError(message % (string, e))
+        elif self._style in ['osaccess','test']:
+            # test before returning a 'delayed' object
+            string = self._ostest(string)
+            result = self.__delay_call__(string)
+            """
+            if 'r' in self._mode:
+                # alt read test
+                try:
+                    with result() as f:
+                        print('%s tests ok'%f.name)
+                        pass
+                except OSError as e:
+                    message = _("can't open '%s': %s")
+                    raise ArgumentTypeError(message % (string, e))
+            """
+            return result
+        else:
+            raise ArgumentTypeError('Unknown FIleContext style')
 
     def __delay_call__(self, string):
         # delayed mode

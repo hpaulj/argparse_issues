@@ -1729,6 +1729,7 @@ class TestFileContextW(TempDirMixin, ParserTestCase):
 
 
 class RDFile(object):
+    # object capable of recognizing an 'equivalent' FileContext object
     seen = {}
 
     def __init__(self, name):
@@ -1740,11 +1741,18 @@ class RDFile(object):
         else:
             with other() as f:
                 # other is file opener wrapped in a partial
-                text = self.seen[other] = f.read()
                 other.name = f.name
+                if other.name == '<stdin>':
+                    # do not attempt to read from stdin
+                    text = self.seen[other] = other.name
+                else:
+                    text = self.seen[other] = f.read()
+
         if not isinstance(text, str):
             text = text.decode('ascii')
         return self.name == other.name == text
+    def __repr__(self):
+        return "RDFile(%r)"%self.name
 
 
 class TestFileContextDelayedR(TempDirMixin, ParserTestCase):
@@ -1766,13 +1774,42 @@ class TestFileContextDelayedR(TempDirMixin, ParserTestCase):
     ]
     failures = ['-x',
                 '',
-                #'non-existent-file.txt' # delayed does not do existence test
+                # 'non-existent-file.txt', # delayed does not do existence test
                 ]
     successes = [
         ('foo', NS(x=None, spam=RDFile('foo'))),
         ('-x foo bar', NS(x=RDFile('foo'), spam=RDFile('bar'))),
         ('bar -x foo', NS(x=RDFile('foo'), spam=RDFile('bar'))),
-        #('-x - -', NS(x=sys.stdin, spam=sys.stdin)),
+        ('-x - -', NS(x=RDFile('<stdin>'), spam=RDFile('<stdin>'))),
+        ('readonly', NS(x=None, spam=RDFile('readonly'))),
+    ]
+
+class TestFileContextAccessR(TempDirMixin, ParserTestCase):
+    """Test the FileContext option/argument type for reading files
+    with style=delayed.  Values in namespace will be a wrapped
+    file opener."""
+
+    def setUp(self):
+        super(TestFileContextAccessR, self).setUp()
+        for file_name in ['foo', 'bar']:
+            file = open(os.path.join(self.temp_dir, file_name), 'w')
+            file.write(file_name)
+            file.close()
+        self.create_readonly_file('readonly')
+
+    argument_signatures = [
+        Sig('-x', type=argparse.FileContext(style='osaccess')),
+        Sig('spam', type=argparse.FileContext('r',style='osaccess')),
+    ]
+    failures = ['-x',
+                '',
+                'non-existent-file.txt'
+                ]
+    successes = [
+        ('foo', NS(x=None, spam=RDFile('foo'))),
+        ('-x foo bar', NS(x=RDFile('foo'), spam=RDFile('bar'))),
+        ('bar -x foo', NS(x=RDFile('foo'), spam=RDFile('bar'))),
+        ('-x - -', NS(x=RDFile('<stdin>'), spam=RDFile('<stdin>'))),
         ('readonly', NS(x=None, spam=RDFile('readonly'))),
     ]
 
