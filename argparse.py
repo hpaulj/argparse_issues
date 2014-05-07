@@ -175,6 +175,43 @@ def _is_mnrep(nargs):
     else:
         return False
 
+def _format_choices(choices, expand=False, summarize=None):
+    # consolidate the choices formatting in one place; issue16468
+    # use formatting as before
+    # unless choices is not iterable
+    # in which case the repr()
+    # could make this an Action method
+    # another thing to use is the metavar
+    if hasattr(choices, '__contains__'):
+        rep = repr(choices)
+    else:
+        raise AttributeError('choices must support the in operator')
+    # or do ' ' in choices, which would raise
+    # TypeError: argument of type 'instance' is not iterable
+    try:
+        choice_strs = [str(choice) for choice in choices]
+        if summarize:
+            n = len(choice_strs)
+            if n>summarize:
+                split = [6,2]
+                if summarize<15:
+                    split = [summarize//3,2]
+                # should tweak this is n is close to 10
+                ll = [choice_strs[i] for i in range(0, split[0])]
+                ll += ['...']
+                ll += [choice_strs[i] for i in range(n-split[1],n)]
+                choice_strs = ll
+        if expand:
+            # expanded form used in help
+            result = ', '.join(choice_strs)
+        else:
+            # compact form used in usage
+            result = '{%s}' % ','.join(choice_strs)
+            rep = rep.replace(' ', '')
+    except TypeError:
+        return rep
+    return result
+
 # ===============
 # Formatting Help
 # ===============
@@ -584,8 +621,9 @@ class HelpFormatter(object):
         if action.metavar is not None:
             result = action.metavar
         elif action.choices is not None:
-            choice_strs = [str(choice) for choice in action.choices]
-            result = '{%s}' % ','.join(choice_strs)
+            #choice_strs = [str(choice) for choice in action.choices]
+            #result = '{%s}' % ','.join(choice_strs)
+            result = _format_choices(action.choices)
         else:
             result = default_metavar
 
@@ -631,7 +669,8 @@ class HelpFormatter(object):
             if hasattr(params[name], '__name__'):
                 params[name] = params[name].__name__
         if params.get('choices') is not None:
-            choices_str = ', '.join([str(c) for c in params['choices']])
+            #choices_str = ', '.join([str(c) for c in params['choices']])
+            choices_str = _format_choices(params['choices'], expand=True)
             params['choices'] = choices_str
         return self._get_help_string(action) % params
 
@@ -716,8 +755,6 @@ class MetavarTypeHelpFormatter(HelpFormatter):
 
     def _get_default_metavar_for_positional(self, action):
         return action.type.__name__
-
-
 
 # =====================
 # Options and Arguments
@@ -1811,7 +1848,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
         try:
             self._get_formatter()._format_args(action, None)
-        except ValueError as e:
+        except (ValueError, AttributeError) as e:
             raise ArgumentError(action, str(e))
         except TypeError:
             #raise ValueError("length of metavar tuple does not match nargs")
@@ -2637,11 +2674,26 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
     def _check_value(self, action, value):
         # converted value must be one of the choices (if specified)
-        if action.choices is not None and value not in action.choices:
-            args = {'value': value,
-                    'choices': ', '.join(map(repr, action.choices))}
-            msg = _('invalid choice: %(value)r (choose from %(choices)s)')
-            raise ArgumentError(action, msg % args)
+        if action.choices is not None:
+            choices = action.choices
+            if isinstance(choices, str):
+                # so 'in' does not find substrings
+                choices = list(choices)
+            try:
+                aproblem = value not in choices
+            except Exception as e:
+                msg = _('invalid choice: %r, %s'%(value, e))
+                # e.g. None not in 'astring'
+                raise ArgumentError(action, msg)
+            if aproblem:
+                # summarize is # choices exceeds this value
+                # is there a reasonable way of giving user control of this?
+                args = {'value': value,
+                        #'choices': ', '.join(map(repr, action.choices)),
+                        'choices': _format_choices(choices, summarize=15),
+                        }
+                msg = _('invalid choice: %(value)r (choose from %(choices)s)')
+                raise ArgumentError(action, msg % args)
 
     # =======================
     # Help-formatting methods
