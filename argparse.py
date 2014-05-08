@@ -92,21 +92,6 @@ import textwrap as _textwrap
 
 from gettext import gettext as _, ngettext
 
-import logging as _logging
-_logging.basicConfig(filename='issue9338.log',level=_logging.DEBUG)
-
-def _log(*args):
-    pass
-_log = print
-def _log(*args):
-    #_logging.info(args)
-    try:
-        args = ' '+' '.join(['%s'%(x,) for x in args])
-    except AttributeError:
-        pass
-    _logging.info(args)
-
-
 SUPPRESS = '==SUPPRESS=='
 
 OPTIONAL = '?'
@@ -2033,11 +2018,9 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
                     # if action takes a variable number of arguments, see
                     # if it needs to share any with remaining positionals
-                    _log(action.dest, arg_count, selected_patterns, selected_patterns.count('O'))
                     if self._is_nargs_variable(action):
                         # variable range of args for this action
                         slots = self._match_arguments_partial([action]+positionals, selected_patterns)
-                        _log('    opt+pos slots',slots)
                         shared_count = slots[0]
                     else:
                         shared_count = None
@@ -2047,9 +2030,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                     # but earlier ones (penult) might also
 
                     if shared_count is not None and selected_patterns.count('O')<=penult:
-                        # _log('    COUNTS:',arg_count, shared_count)
                         if arg_count>shared_count:
-                            _log('    changing arg_count %s to shared_count %s'%(arg_count,shared_count))
                             arg_count = shared_count
 
                     stop = start + arg_count
@@ -2158,9 +2139,6 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
         penult = arg_strings_pattern.count('O') # # of 'O' in 'AOAA' patttern
         opt_actions = [v[0] for v in option_string_indices.values() if v[0]]
-        _log(arg_strings_pattern, penult,
-            {'%s%s'%(v.dest,(v.nargs if v.nargs else '')) for v in opt_actions},
-            ['%s%s'%(k.dest,(k.nargs if k.nargs else '')) for k in positionals])
 
         _cnt = 0
         if self._is_nargs_variable(opt_actions) and positionals and penult>1:
@@ -2173,13 +2151,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 extras = consume_loop(True, ii)
                 _cnt += 1
                 if len(positionals)==0:
-                    _log('  PENULT',ii, (extras if extras else ''), 'all pos matched')
                     break
-                else:
-                    _log('  PENULT',ii,
-                        (extras if extras else ''), '%s pos left'%len(positionals))
-            if positionals:
-                _log('  Positionals after penult')
         else:
             # don't need a test run; but do use action+positionals parsing
             ii = 0
@@ -2188,7 +2160,6 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         positionals = self._get_positional_actions()
         extras = consume_loop(False, ii)
         _cnt += 1
-        _log('  II', _cnt, penult, arg_strings_pattern, extras, len(positionals))
 
         # make sure all required actions were present and also convert
         # action defaults which were not given as arguments
@@ -2231,7 +2202,6 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                     self.error(msg % ' '.join(names))
 
         # return the updated namespace and the extra arguments
-        _log(namespace,extras)
         return namespace, extras
 
     def _read_args_from_files(self, arg_strings):
