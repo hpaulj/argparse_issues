@@ -1617,6 +1617,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         self._positionals = add_group(_('positional arguments'))
         self._optionals = add_group(_('optional arguments'))
         self._subparsers = None
+        self._disabled_interspersed_args = False
 
         # register types
         def identity(string):
@@ -1641,6 +1642,9 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 pass
             else:
                 self._defaults.update(defaults)
+
+    def disable_interspersed_args(self):
+        self._disabled_interspersed_args = True
 
     # =======================
     # Pretty __repr__ methods
@@ -1776,8 +1780,12 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         for i, arg_string in enumerate(arg_strings_iter):
 
             # all args after -- are non-options
-            if arg_string == '--':
-                arg_string_pattern_parts.append('-')
+            # If options and non-options cannot mix,
+            # all remaining args are non-options
+            if (arg_string and arg_string[0] not in self.prefix_chars and \
+                   self._disabled_interspersed_args) or arg_string == '--':
+                part = '-' if arg_string == '--' else 'A'
+                arg_string_pattern_parts.append(part)
                 for arg_string in arg_strings_iter:
                     arg_string_pattern_parts.append('A')
 
