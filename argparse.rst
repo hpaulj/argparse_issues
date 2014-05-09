@@ -135,7 +135,7 @@ ArgumentParser objects
                           formatter_class=argparse.HelpFormatter, \
                           prefix_chars='-', fromfile_prefix_chars=None, \
                           argument_default=None, conflict_handler='error', \
-                          add_help=True)
+                          allow_abbrev=True, add_help=True)
 
    Create a new :class:`ArgumentParser` object. All parameters should be passed
    as keyword arguments. Each parameter has its own more detailed description
@@ -166,6 +166,9 @@ ArgumentParser objects
 
    * conflict_handler_ - The strategy for resolving conflicting optionals
      (usually unnecessary)
+
+   * allow_abbrev_ - Allows long options to be abbreviated if the
+     abbreviation is unambiguous. (default: ``True``)
 
    * add_help_ - Add a -h/--help option to the parser (default: ``True``)
 
@@ -521,6 +524,36 @@ calls, we supply ``argument_default=SUPPRESS``::
    >>> parser.parse_args([])
    Namespace()
 
+allow_abbrev
+^^^^^^^^^^^^
+
+Normally, when you pass an argument list to the
+:meth:`~ArgumentParser.parse_args` method of a :class:`ArgumentParser`,
+it recognizes abbreviations of long options::
+
+   >>> parser = argparse.ArgumentParser(prog='PROG')
+   >>> parser.add_argument('--foobar', action='store_true')
+   >>> parser.add_argument('--foonley', action='store_false')
+   >>> parser.parse_args('--foon'.split())
+   Namespace(foobar=False, foonley=False)
+
+However, if the abbreviation is ambiguous::
+
+   >>> parser.parse_args('--foo'.split())
+   usage: PROG [-h] [--foobar] [--foonley]
+   PROG: error: ambiguous option: --foo could match --foonley, --foobar
+   An exception has occurred, use %tb to see the full traceback.
+
+However, this feature can also be disabled, by setting ``allow_abbrev=``
+to false::
+
+   >>> parser = argparse.ArgumentParser(prog='PROG', allow_abbrev=False)
+   >>> parser.add_argument('--foobar', action='store_true')
+   >>> parser.add_argument('--foonley', action='store_false')
+   >>> parser.parse_args('--foon'.split())
+   usage: PROG [-h] [--foobar] [--foonley]
+   PROG: error: unrecognized arguments: --food
+   An exception has occurred, use %tb to see the full traceback.
 
 conflict_handler
 ^^^^^^^^^^^^^^^^
@@ -1449,8 +1482,8 @@ if positional arguments could be confused with command options::
 Argument abbreviations
 ^^^^^^^^^^^^^^^^^^^^^^
 
-The :meth:`~ArgumentParser.parse_args` method allows long options to be
-abbreviated if the abbreviation is unambiguous::
+The :meth:`~ArgumentParser.parse_args` method by default allows long
+options to be abbreviated if the abbreviation is unambiguous::
 
    >>> parser = argparse.ArgumentParser(prog='PROG')
    >>> parser.add_argument('-bacon')

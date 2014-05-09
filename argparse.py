@@ -1688,6 +1688,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             additional arguments
         - argument_default -- The default value for all arguments
         - conflict_handler -- String indicating how to handle conflicts
+        - accept_abbrev -- Allow long options to be abbreviated unambiguously
         - add_help -- Add a -h/-help option
     """
 
@@ -1702,6 +1703,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                  fromfile_prefix_chars=None,
                  argument_default=None,
                  conflict_handler='error',
+                 allow_abbrev=True,
                  add_help=True,
                  args_default_to_positional=False,
                  ):
@@ -1721,6 +1723,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         self.epilog = epilog
         self.formatter_class = formatter_class
         self.fromfile_prefix_chars = fromfile_prefix_chars
+        self.allow_abbrev = allow_abbrev
         self.add_help = add_help
         self.args_default_to_positional = args_default_to_positional
 
@@ -2316,23 +2319,24 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 action = self._option_string_actions[option_string]
                 return action, option_string, explicit_arg
 
-        # search through all possible prefixes of the option string
-        # and all actions in the parser for possible interpretations
-        option_tuples = self._get_option_tuples(arg_string)
+        if self.allow_abbrev is True:
+            # search through all possible prefixes of the option string
+            # and all actions in the parser for possible interpretations
+            option_tuples = self._get_option_tuples(arg_string)
 
-        # if multiple actions match, the option string was ambiguous
-        if len(option_tuples) > 1:
-            options = ', '.join([option_string
-                for action, option_string, explicit_arg in option_tuples])
-            args = {'option': arg_string, 'matches': options}
-            msg = _('ambiguous option: %(option)s could match %(matches)s')
-            self.error(msg % args)
+            # if multiple actions match, the option string was ambiguous
+            if len(option_tuples) > 1:
+                options = ', '.join([option_string
+                    for action, option_string, explicit_arg in option_tuples])
+                args = {'option': arg_string, 'matches': options}
+                msg = _('ambiguous option: %(option)s could match %(matches)s')
+                self.error(msg % args)
 
-        # if exactly one action matched, this segmentation is good,
-        # so return the parsed action
-        elif len(option_tuples) == 1:
-            option_tuple, = option_tuples
-            return option_tuple
+            # if exactly one action matched, this segmentation is good,
+            # so return the parsed action
+            elif len(option_tuples) == 1:
+                option_tuple, = option_tuples
+                return option_tuple
 
         # behave more like optparse even if the argument looks like a option
         if self.args_default_to_positional:
