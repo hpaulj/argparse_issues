@@ -1678,8 +1678,13 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         if kwargs.get('prog') is None:
             formatter = self._get_formatter()
             positionals = self._get_positional_actions()
+            optionals = self._get_optional_actions()
+            optionals = [a for a in optionals if a.required]
+            requireds = optionals + positionals
             groups = self._mutually_exclusive_groups
-            formatter.add_usage(self.usage, positionals, groups, '')
+            # why include groups?  All actions in a group have to be optional
+            groups = []
+            formatter.add_usage(self.usage, requireds, groups, '')
             kwargs['prog'] = formatter.format_help().strip()
 
         # create the parsers action and add it to the positionals list
