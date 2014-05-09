@@ -1580,7 +1580,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             additional arguments
         - argument_default -- The default value for all arguments
         - conflict_handler -- String indicating how to handle conflicts
-        - accept_abbrev -- Allow long options to be abbreviated unambiguously
+        - allow_abbrev -- Allow long options to be abbreviated unambiguously
         - add_help -- Add a -h/-help option
     """
 
