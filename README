@@ -1,0 +1,54 @@
+explore what it takes to run development argparse on python2.7
+
+in argparse there appears to be only one problem: 'yield from'
+which can be easily replaced (reverted to an earlier form)
+
+revert to
+    text.splitlines(True)
+from
+    text.splitlines(keepends=True)
+
+
+2.7 returns IOError where 3. returns OSError
+
+conditionally revert to 2.7 FileType
+
+----------------------------
+in test_argparse there are more issues:
+support has different name
+there's no mock
+
+try:
+    from test import support
+except ImportError:
+    # python2.7 compatibility
+    from test import test_support as support
+
+try:
+    from unittest import mock
+except ImportError:
+    mock = None
+plus an @skipIf
+
+from io import StringIO
+from StringIO import StringIO # 2.7
+
+RawDescriptionHelpFormatter
+text.splitlines(keepends=True))
+TypeError: splitlines() takes no keyword arguments - replace with pos arg
+
+a bunch of FileType errors
+  File "test_argparse.py", line 133, in stderr_to_parser_error
+    raise ArgumentParserError("SystemExit", stdout, stderr, code)
+  ArgumentParserError: ('SystemExit', '', "usage: python -m unittest [-h] [-x X] spam\npython -m unittest: error: argument spam: invalid FileType('wb') value: 'foo'\n")
+
+revert to 2.7 FileType
+tests using 'errors' and 'encoding' need to be skipped
+
+convert
+super().setUp()
+to
+super(TestArgumentsFromFileConverter, self).setUp()
+
+AttributeError: 'TestMessageContentError' object has no attribute 'assertRegex'
+

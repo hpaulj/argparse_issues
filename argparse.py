@@ -606,7 +606,9 @@ class HelpFormatter(object):
             pass
         else:
             self._indent()
-            yield from get_subactions()
+            # yield from get_subactions() # unnecessary v3 feature
+            for subaction in get_subactions():
+                yield subaction
             self._dedent()
 
     def _split_lines(self, text, width):
@@ -636,7 +638,7 @@ class RawDescriptionHelpFormatter(HelpFormatter):
     """
 
     def _fill_text(self, text, width, indent):
-        return ''.join(indent + line for line in text.splitlines(keepends=True))
+        return ''.join(indent + line for line in text.splitlines(True))
 
 
 class RawTextHelpFormatter(RawDescriptionHelpFormatter):
@@ -1178,6 +1180,51 @@ class FileType(object):
                              ['%s=%r' % (kw, arg) for kw, arg in kwargs
                               if arg is not None])
         return '%s(%s)' % (type(self).__name__, args_str)
+
+# 2.7 FileType
+
+class _FileType(object):
+    """Factory for creating file object types
+
+    Instances of FileType are typically passed as type= arguments to the
+    ArgumentParser add_argument() method.
+
+    Keyword Arguments:
+        - mode -- A string indicating how the file is to be opened. Accepts the
+            same values as the builtin open() function.
+        - bufsize -- The file's desired buffer size. Accepts the same values as
+            the builtin open() function.
+    """
+
+    def __init__(self, mode='r', bufsize=-1):
+        self._mode = mode
+        self._bufsize = bufsize
+
+    def __call__(self, string):
+        # the special argument "-" means sys.std{in,out}
+        if string == '-':
+            if 'r' in self._mode:
+                return _sys.stdin
+            elif 'w' in self._mode:
+                return _sys.stdout
+            else:
+                msg = _('argument "-" with mode %r') % self._mode
+                raise ValueError(msg)
+
+        # all other arguments are used as file names
+        try:
+            return open(string, self._mode, self._bufsize)
+        except IOError as e:
+            message = _("can't open '%s': %s")
+            raise ArgumentTypeError(message % (string, e))
+
+    def __repr__(self):
+        args = self._mode, self._bufsize
+        args_str = ', '.join(repr(arg) for arg in args if arg != -1)
+        return '%s(%s)' % (type(self).__name__, args_str)
+
+if _sys.version_info.major==2:
+    FileType = _FileType
 
 # ===========================
 # Optional and Positional Parsing
@@ -2017,7 +2064,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                                 arg_strings.append(arg)
                         arg_strings = self._read_args_from_files(arg_strings)
                         new_arg_strings.extend(arg_strings)
-                except OSError:
+                except (OSError, IOError):
                     err = _sys.exc_info()[1]
                     self.error(str(err))
 
