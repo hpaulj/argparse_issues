@@ -80,6 +80,7 @@ __all__ = [
     'REMAINDER',
     'SUPPRESS',
     'ZERO_OR_MORE',
+    'ListProgHelpFormatter',
 ]
 
 
@@ -462,6 +463,7 @@ class HelpFormatter(object):
                 if part:
                     parts += part
                 i += 1
+        parts = [s for s in parts if s]
         return parts
 
     def _format_group_usage(self, group):
@@ -740,6 +742,119 @@ class MetavarTypeHelpFormatter(HelpFormatter):
 
     def _get_default_metavar_for_positional(self, action):
         return action.type.__name__
+
+class ListProgHelpFormatter(HelpFormatter):
+    """
+    usage that takes 'prog' as a list
+    """
+    def _format_usage(self, usage, actions, groups, prefix, aslist=False):
+        print('_format_usage',self._prog, type(self._prog))
+        usage_parts = []
+        if isinstance(self._prog, list):
+            prog_list = self._prog
+        else:
+            prog_list = [self._prog]
+        prog_str = '.'.join(prog_list)
+
+        if prefix is None:
+            prefix = _('usage: ')
+
+        # if usage is specified, use that
+        if usage is not None:
+            usage = usage % dict(prog=prog_str)
+
+        # if no optionals or positionals are available, usage is just prog
+        elif usage is None and not actions:
+            usage = '%(prog)s' % dict(prog=prog_str)
+
+        # if optionals and positionals are available, calculate usage
+        elif usage is None:
+            #prog = '%(prog)s' % dict(prog=prog_str)
+
+            # split optionals from positionals
+            optionals = []
+            positionals = []
+            for action in actions:
+                if action.option_strings:
+                    optionals.append(action)
+                else:
+                    positionals.append(action)
+
+            # build full usage string
+            format = self._format_actions_usage
+            action_parts = format(optionals + positionals, groups)
+            usage_parts = prog_list + action_parts
+            usage = ' '.join(usage_parts)
+
+            # wrap the usage parts if it's too long
+            text_width = self._width - self._current_indent
+            if len(prefix) + len(usage) > text_width:
+
+                opt_parts = format(optionals, groups)
+                pos_parts = format(positionals, groups)
+
+                # helper for wrapping lines
+                def get_lines(parts, indent, prefix=None):
+                    lines = []
+                    line = []
+                    if prefix is not None:
+                        line_len = len(prefix) - 1
+                    else:
+                        line_len = len(indent) - 1
+                    for part in parts:
+                        if line and line_len + 1 + len(part) > text_width:
+                            lines.append(indent + ' '.join(line))
+                            line = []
+                            line_len = len(indent) - 1
+                        line.append(part)
+                        line_len += len(part) + 1
+                    if line:
+                        lines.append(indent + ' '.join(line))
+                    if prefix is not None:
+                        lines[0] = lines[0][len(indent):]
+                    return lines
+
+                # if prog is short, follow it with optionals or positionals
+                prog_len = sum(len(l) for l in prog_list)
+                if len(prefix) + prog_len <= 0.75 * text_width:
+                    indent = ' ' * (len(prefix) + prog_len + 1)
+                    if opt_parts:
+                        lines = get_lines(prog_list + opt_parts, indent, prefix)
+                        lines.extend(get_lines(pos_parts, indent))
+                    elif pos_parts:
+                        lines = get_lines(prog_list + pos_parts, indent, prefix)
+                    else:
+                        lines = prog_list
+
+                # if prog is long, put it on its own line
+                else:
+                    indent = ' ' * len(prefix)
+                    if len(prog_list)==1:
+
+                        parts = opt_parts + pos_parts
+                        lines = get_lines(parts, indent)
+                        if len(lines) > 1:
+                            lines = []
+                            lines.extend(get_lines(opt_parts, indent))
+                            lines.extend(get_lines(pos_parts, indent))
+                        lines = prog_list + lines
+                    else:
+                        # if multiitem 'prog' list
+                        lines = get_lines(prog_list+opt_parts+pos_parts, indent, prefix)
+
+                # join lines into usage
+                usage = '\n'.join(lines)
+
+        if aslist:
+            #
+            if usage_parts:
+                return usage_parts
+            else:
+                return [usage]
+        else:
+            # prefix with 'usage:'
+            return '%s%s\n\n' % (prefix, usage)
+
 
 # =====================
 # Options and Arguments
@@ -1156,7 +1271,8 @@ class _SubParsersAction(Action):
         # set prog from the existing prefix
         if kwargs.get('prog') is None:
             kwargs['prog'] = '%s %s' % (self._prog_prefix, name)
-
+            if isinstance(self._prog_prefix, list):
+                kwargs['prog'] = self._prog_prefix + [name]
         aliases = kwargs.pop('aliases', ())
 
         # create a pseudo-action to hold the choice help
@@ -1794,12 +1910,16 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             positionals = self._get_positional_actions()
             optionals = self._get_optional_actions()
             optionals = [a for a in optionals if a.required]
-            requireds = optionals + positionals
+            actions = optionals + positionals
             groups = self._mutually_exclusive_groups
             # why include groups?  All actions in a group have to be optional
             groups = []
-            formatter.add_usage(self.usage, requireds, groups, '')
+            formatter.add_usage(self.usage, actions, groups, '')
             kwargs['prog'] = formatter.format_help().strip()
+
+            if isinstance(formatter, ListProgHelpFormatter):
+                prog = formatter._format_usage(self.usage, actions, groups, '',aslist=True)
+                kwargs['prog'] = prog
 
         # create the parsers action and add it to the positionals list
         parsers_class = self._pop_action_class(kwargs, 'parsers')
