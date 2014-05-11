@@ -135,7 +135,7 @@ ArgumentParser objects
                           formatter_class=argparse.HelpFormatter, \
                           prefix_chars='-', fromfile_prefix_chars=None, \
                           argument_default=None, conflict_handler='error', \
-                          add_help=True)
+                          allow_abbrev=True, add_help=True)
 
    Create a new :class:`ArgumentParser` object. All parameters should be passed
    as keyword arguments. Each parameter has its own more detailed description
@@ -167,7 +167,13 @@ ArgumentParser objects
    * conflict_handler_ - The strategy for resolving conflicting optionals
      (usually unnecessary)
 
+   * allow_abbrev_ - Allows long options to be abbreviated if the
+     abbreviation is unambiguous. (default: ``True``)
+
    * add_help_ - Add a -h/--help option to the parser (default: ``True``)
+
+   * args_default_to_positional_ - Parse unrecognized arguments as
+     positionals, as opposed to optionals (default: False).
 
 The following sections describe how each of these are used.
 
@@ -518,6 +524,36 @@ calls, we supply ``argument_default=SUPPRESS``::
    >>> parser.parse_args([])
    Namespace()
 
+allow_abbrev
+^^^^^^^^^^^^
+
+Normally, when you pass an argument list to the
+:meth:`~ArgumentParser.parse_args` method of a :class:`ArgumentParser`,
+it recognizes abbreviations of long options::
+
+   >>> parser = argparse.ArgumentParser(prog='PROG')
+   >>> parser.add_argument('--foobar', action='store_true')
+   >>> parser.add_argument('--foonley', action='store_false')
+   >>> parser.parse_args('--foon'.split())
+   Namespace(foobar=False, foonley=False)
+
+However, if the abbreviation is ambiguous::
+
+   >>> parser.parse_args('--foo'.split())
+   usage: PROG [-h] [--foobar] [--foonley]
+   PROG: error: ambiguous option: --foo could match --foonley, --foobar
+   An exception has occurred, use %tb to see the full traceback.
+
+However, this feature can also be disabled, by setting ``allow_abbrev=``
+to false::
+
+   >>> parser = argparse.ArgumentParser(prog='PROG', allow_abbrev=False)
+   >>> parser.add_argument('--foobar', action='store_true')
+   >>> parser.add_argument('--foonley', action='store_false')
+   >>> parser.parse_args('--foon'.split())
+   usage: PROG [-h] [--foobar] [--foonley]
+   PROG: error: unrecognized arguments: --food
+   An exception has occurred, use %tb to see the full traceback.
 
 conflict_handler
 ^^^^^^^^^^^^^^^^
@@ -602,6 +638,36 @@ the help options::
 
    optional arguments:
      -h, --help  show this help message and exit
+
+args_default_to_positional
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:class:`ArgumentParser` parses the argument strings, classifying them as
+optionals or positionals (arguments). By default, a string starting with one of the
+``prefix_chars`` is assumed to be a command-line option.  If ``args_default_to_positional=True``,
+such a string will be parsed as an argument, unless it matches one of the defined
+command-line options::
+
+   >>> parser = argparse.ArgumentParser(args_default_to_positional=True)
+   >>> parser.add_argument('--foo')
+   >>> parser.add_argument('--bar', nargs=2)
+   >>> parser.parse_args('--foo --baz --bar -one -two'.split())
+   Namespace(bar=['-one', '-two'], foo='--baz')
+
+This approximates the behavior of :mod:`optparse`, which freely accepts
+arguments that begin with ``'-'``.  Note however that in this example ``--foo --bar``
+gives an error, since ``--bar`` is defined as a command-line option::
+
+   >>> parser.parse_args('--foo --bar'.split())
+   usage: [-h] [--foo FOO] [--bar BAR BAR]
+   : error: argument --foo: expected one argument
+
+Joining the option and value with `=` gets around this limitation::
+
+   >>> parser.parse_args('--foo=--bar'.split())
+   Namespace(bar=None, foo='--bar')
+
+See also `Arguments containing -`_.
 
 
 The add_argument() method
@@ -879,6 +945,21 @@ values are:
      >>> parser.add_argument('args', nargs=argparse.REMAINDER)
      >>> print(parser.parse_args('--foo B cmd --arg1 XX ZZ'.split()))
      Namespace(args=['--arg1', 'XX', 'ZZ'], command='cmd', foo='B')
+
+
+* ``'{m,n}'``.  `m` to `n` command-line arguments are gathered into a list.
+  This is modeled on the Regular Expression use. ``'{,n}'`` gathers up to
+  `n` arguments.  ``'{m,}'`` gathers `m` or more.  Thus ``'{1,}'`` is the
+  equivalent to ``'+'``, and ``'{,1}'`` to ``'?'``.  A tuple notation is
+  also accepted, ``'(m,n)'``, ``'(None,n)'``, ``'(m,None)'``.  For example::
+
+     >>> parser = argparse.ArgumentParser(prog='PROG')
+     >>> parser.add_argument('--foo', nargs='{2,4}')
+     >>> parser.parse_args('--foo a b c'.split())
+     Namespace(foo=['a', 'b', 'c'])
+     >>> parser.parse_args('--foo a'.split())
+     usage: PROG [-h] [--foo FOO{2,4}]
+     PROG: error: argument --foo: expected {2,4} arguments
 
 If the ``nargs`` keyword argument is not provided, the number of arguments consumed
 is determined by the action_.  Generally this means a single command-line argument
@@ -1321,6 +1402,7 @@ it exits and prints the error along with a usage message::
    usage: PROG [-h] [--foo FOO] [bar]
    PROG: error: extra arguments found: badger
 
+.. _`Arguments containing -`:
 
 Arguments containing ``-``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1345,6 +1427,10 @@ there are no options in the parser that look like negative numbers::
    >>> parser.parse_args(['-x', '-1', '-5'])
    Namespace(foo='-5', x='-1')
 
+   >>> # complex and scientific notation are accepted as well
+   >>> parser.parse_args(['-x', '-1e-3', '-1-4j'])
+   Namespace(foo='-1-4j', x='-1e-3')
+
    >>> parser = argparse.ArgumentParser(prog='PROG')
    >>> parser.add_argument('-1', dest='one')
    >>> parser.add_argument('foo', nargs='?')
@@ -1353,15 +1439,19 @@ there are no options in the parser that look like negative numbers::
    >>> parser.parse_args(['-1', 'X'])
    Namespace(foo=None, one='X')
 
-   >>> # negative number options present, so -2 is an option
+   >>> # negative number options present, so -2 is an unrecognized option
    >>> parser.parse_args(['-2'])
    usage: PROG [-h] [-1 ONE] [foo]
-   PROG: error: no such option: -2
+   PROG: error: unrecognized arguments: -2
 
    >>> # negative number options present, so both -1s are options
    >>> parser.parse_args(['-1', '-1'])
    usage: PROG [-h] [-1 ONE] [foo]
    PROG: error: argument -1: expected one argument
+
+   >>> # negative number options present, '-1...' is -1 option plus argument
+   >>> parser.test(['-1.3e4'])
+   Namespace(foo=None, one='.3e4')
 
 If you have positional arguments that must begin with ``-`` and don't look
 like negative numbers, you can insert the pseudo-argument ``'--'`` which tells
@@ -1371,12 +1461,29 @@ argument::
    >>> parser.parse_args(['--', '-f'])
    Namespace(foo='-f', one=None)
 
+:class:`ArgumentParser` optional argument, args_default_to_positional_
+alters this behavior, allowing a positional argument to begin with ``-``,
+provided it does not match a defined option.  Use this alternative with caution
+if positional arguments could be confused with command options::
+
+   >>> parser = argparse.ArgumentParser(args_default_to_positional=True)
+   >>> parser.add_argument('-1', dest='one')
+   >>> parser.add_argument('foo', nargs='?')
+
+   >>> # default_to_positional, '-2-4j' is now recognized as an argument
+   >>> parser.parse_args(['-1', '-2-4j', '-3-4j'])
+   Namespace(foo='-3-4j', one='-2-4j')
+
+   >>> # default_to_positional, '-1.3e4' still matches the -1 option
+   >>> parser.parse_args(['-1.3e4'])
+   Namespace(foo=None, one='.3e4')
+
 
 Argument abbreviations
 ^^^^^^^^^^^^^^^^^^^^^^
 
-The :meth:`~ArgumentParser.parse_args` method allows long options to be
-abbreviated if the abbreviation is unambiguous::
+The :meth:`~ArgumentParser.parse_args` method by default allows long
+options to be abbreviated if the abbreviation is unambiguous::
 
    >>> parser = argparse.ArgumentParser(prog='PROG')
    >>> parser.add_argument('-bacon')
@@ -1452,7 +1559,26 @@ Other utilities
 Sub-commands
 ^^^^^^^^^^^^
 
-.. method:: ArgumentParser.add_subparsers()
+.. method:: ArgumentParser.add_subparsers([title], [description], [prog], [dest], \
+                           [required], [help], [metavar])
+
+   Create an action object which parses a command-line argument as a choice
+   from a set of parser sub-commands.  The keyword arguments include a subset of
+   those accepted by :meth:`ArgumentParser.add_argument`.
+
+   * title_ - If defined, display the sub-command choices as an argument group.
+
+   * `description` - Description of the argument group.
+
+   * `prog` - Usage prefix in the subparser help output (default uses the parser prog_).
+
+   * dest_ - :class:`Namespace` attribute to hold the sub-command name (default ``argparse.SUPPRESS``).
+
+   * required_ - Whether or not the command-line option may be omitted (default ``True``).
+
+   * help_ - A brief description of subparser group.
+
+   * metavar_ - A name for the sub-command in the usage message.
 
    Many programs split up their functionality into a number of sub-commands,
    for example, the ``svn`` program can invoke sub-commands like ``svn
@@ -1492,7 +1618,8 @@ Sub-commands
    command line (and not any other subparsers).  So in the example above, when
    the ``a`` command is specified, only the ``foo`` and ``bar`` attributes are
    present, and when the ``b`` command is specified, only the ``foo`` and
-   ``baz`` attributes are present.
+   ``baz`` attributes are present.  In this example, all argument strings after
+   subparser name ('a' or 'b') are parsed by that subparser.
 
    Similarly, when a help message is requested from a subparser, only the help
    for that particular parser will be printed.  The help message will not
@@ -1529,6 +1656,8 @@ Sub-commands
      optional arguments:
        -h, --help     show this help message and exit
        --baz {X,Y,Z}  baz help
+
+.. _title:
 
    The :meth:`add_subparsers` method also supports ``title`` and ``description``
    keyword arguments.  When either is present, the subparser's commands will
@@ -1728,10 +1857,13 @@ Mutual exclusion
      usage: PROG [-h] (--foo | --bar)
      PROG: error: one of the arguments --foo --bar is required
 
-   Note that currently mutually exclusive argument groups do not support the
+   (remove) Note that currently mutually exclusive argument groups do not support the
    *title* and *description* arguments of
    :meth:`~ArgumentParser.add_argument_group`.
 
+   If a mutually exclusive argument group has *title* and *description*
+   arguments, it will be nested in an argument group defined by
+   those arguments.
 
 Parser defaults
 ^^^^^^^^^^^^^^^
@@ -1865,6 +1997,46 @@ Exiting methods
    This method prints a usage message including the *message* to the
    standard error and terminates the program with a status code of 2.
 
+
+Intermixed parsing
+^^^^^^^^^^^^^^^^^^
+
+.. method:: ArgumentParser.parse_intermixed_args(args=None, namespace=None)
+.. method:: ArgumentParser.parse_known_intermixed_args(args=None, namespace=None)
+
+Some users expect to freely intermix optional and positional argument strings. For
+example, :mod:`optparse`, by default, allows interspersed argument strings.
+GNU :c:func:`getopt`
+permutes the argument strings so non-options are at the end.
+The  :meth:`~ArgumentParser.parse_intermixed_args` method emulates this behavior
+by first calling :meth:`~ArgumentParser.parse_known_args` with just the
+optional arguments being active.  It is then called a second time to parse the list
+of remaining argument strings using the positional arguments.
+
+:meth:`~ArgumentParser.parse_intermixed_args` raises an error if the
+parser uses features that are incompatible with this two step parsing.
+These include subparsers, ``argparse.REMAINDER``, and mutually exclusive
+groups that include both optionals and positionals.
+
+In this example, :meth:`~ArgumentParser.parse_known_args` returns an unparsed
+list of arguments `['2', '3']`, while :meth:`~ArgumentParser.parse_intermixed_args`
+returns `rest=[1, 2, 3]`.
+::
+
+   >>> parser = argparse.ArgumentParser()
+   >>> parser.add_argument('--foo')
+   >>> parser.add_argument('cmd')
+   >>> parser.add_argument('rest', nargs='*', type=int)
+   >>> parser.parse_known_args('cmd1 1 --foo bar 2 3'.split())
+   (Namespace(cmd='cmd1', foo='bar', rest=[1]), ['2', '3'])
+   >>> parser.parse_intermixed_args('cmd1 1 --foo bar 2 3'.split())
+   Namespace(cmd='cmd1', foo='bar', rest=[1, 2, 3])
+
+:meth:`~ArgumentParser.parse_known_intermixed_args` method, returns a
+two item tuple containing the populated namespace and the list of
+remaining argument strings.  :meth:`~ArgumentParser.parse_intermixed_args`
+raises an error if there are any remaining unparsed argument strings.
+
 .. _upgrading-optparse-code:
 
 Upgrading optparse code
@@ -1903,3 +2075,6 @@ A partial upgrade path from :mod:`optparse` to :mod:`argparse`:
 
 * Replace the OptionParser constructor ``version`` argument with a call to
   ``parser.add_argument('--version', action='version', version='<the version>')``
+
+* Use :meth:`~ArgumentParser.parse_intermixed_args` if
+  interspersing switches with command arguments is important.
