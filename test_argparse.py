@@ -761,6 +761,41 @@ class TestOptionalsActionCount(ParserTestCase):
         ('-x', NS(x=1)),
     ]
 
+class TestOptionalsAllowLongAbbreviation(ParserTestCase):
+    """Allow long options to be abbreviated unambiguously"""
+
+    argument_signatures = [
+        Sig('--foo'),
+        Sig('--foobaz'),
+        Sig('--fooble', action='store_true'),
+    ]
+    failures = [ '--foob 5', '--foob', ]
+    successes = [
+        ('', NS(foo=None, foobaz=None, fooble=False)),
+        ('--foo 7', NS(foo='7', foobaz=None, fooble=False)),
+        ('--fooba a', NS(foo=None, foobaz='a', fooble=False)),
+        ('--foobl --foo g', NS(foo='g', foobaz=None, fooble=True)),
+    ]
+
+class TestOptionalsDisallowLongAbbreviation(ParserTestCase):
+    """Do not allow abbreviations of long options at all"""
+
+    parser_signature = Sig(allow_abbrev=False)
+    argument_signatures = [
+        Sig('--foo'),
+        Sig('--foodle', action='store_true'),
+        Sig('--foonly'),
+    ]
+    failures = [
+        '-foon 3',
+        '--food',
+        '--food --foo 2'
+    ]
+    successes = [
+        ('', NS(foo=None, foodle=False, foonly=None)),
+        ('--foo 3', NS(foo='3', foodle=False, foonly=None)),
+        ('--foonly 7 --foodle --foo 2', NS(foo='2', foodle=True, foonly='7')),
+    ]
 
 # ================
 # Positional tests
@@ -820,11 +855,60 @@ class TestPositionalsNargsZeroOrMoreDefault(ParserTestCase):
     ]
 
 
+class TestPositionalsNargsZeroOrMoreChoices(ParserTestCase):
+    """Test a Positional that specifies unlimited nargs with choices"""
+
+    argument_signatures = [Sig('foo', nargs='*', choices=['a', 'b', 'c'])]
+    failures = ['-x', 'spam']
+    successes = [
+        ('', NS(foo=[])),
+        ('a', NS(foo=['a'])),
+        ('a b', NS(foo=['a', 'b'])),
+    ]
+
+
+class TestPositionalsNargsZeroOrMoreChoicesDefault1(ParserTestCase):
+    """Test a Positional that specifies unlimited nargs with choices"""
+
+    argument_signatures = [Sig('foo', nargs='*', choices=['a', 'b', 'c'], default='c')]
+    failures = ['-x', 'spam']
+    successes = [
+        ('', NS(foo='c')),
+        ('a', NS(foo=['a'])),
+        ('a b', NS(foo=['a', 'b'])),
+    ]
+
+
+
+class TestPositionalsNargsZeroOrMoreChoicesDefault2(ParserTestCase):
+    """Test a Positional that specifies unlimited nargs with choices"""
+
+    argument_signatures = [Sig('foo', nargs='*', choices=['a', 'b', 'c'], default=['a', 'b'])]
+    failures = ['-x', 'spam']
+    successes = [
+        ('', NS(foo=['a', 'b'])),
+        ('a', NS(foo=['a'])),
+        ('a b', NS(foo=['a', 'b'])),
+    ]
+
+
+
 class TestPositionalsNargsOneOrMore(ParserTestCase):
     """Test a Positional that specifies one or more nargs"""
 
     argument_signatures = [Sig('foo', nargs='+')]
     failures = ['', '-x']
+    successes = [
+        ('a', NS(foo=['a'])),
+        ('a b', NS(foo=['a', 'b'])),
+    ]
+
+
+class TestPositionalsNargsOneOrMoreChoices(ParserTestCase):
+    """Test a Positional that specifies one or more nargs with choices"""
+
+    argument_signatures = [Sig('foo', nargs='+', choices=['a', 'b', 'c'])]
+    failures = ['', '-x', 'spam']
     successes = [
         ('a', NS(foo=['a'])),
         ('a b', NS(foo=['a', 'b'])),
@@ -1117,6 +1201,27 @@ class TestPositionalsNargsOptionalOneOrMore(ParserTestCase):
     ]
 
 
+class TestPositionalDest(ParserTestCase):
+    """Tests setting destination"""
+
+    argument_signatures = [Sig('foo-bar')]
+    failures = []
+    successes = [
+        ('f', NS(foo_bar='f')),
+    ]
+
+    def test_compatibility(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG',
+                                            description='main description')
+        parser.add_argument('foo-bar')
+        args = parser.parse_args(['f'])
+        self.assertEqual(args.foo_bar, 'f')
+        self.assertEqual(getattr(args, 'foo-bar'), 'f')
+        self.assertRaisesRegex(AttributeError,
+                                "'Namespace' object has no attribute 'a-b'",
+                                getattr, args, 'a-b')
+
+
 class TestPositionalsChoicesString(ParserTestCase):
     """Test a set of single-character choices"""
 
@@ -1228,6 +1333,7 @@ class TestPrefixCharacterOnlyArguments(ParserTestCase):
 
 class TestNargsZeroOrMore(ParserTestCase):
     """Tests specifying an args for an Optional that accepts zero or more"""
+    """Strings that work without the issue9338 patch """
 
     argument_signatures = [Sig('-x', nargs='*'), Sig('y', nargs='*')]
     failures = []
@@ -1239,6 +1345,210 @@ class TestNargsZeroOrMore(ParserTestCase):
         ('a', NS(x=None, y=['a'])),
         ('a -x', NS(x=[], y=['a'])),
         ('a -x b', NS(x=['b'], y=['a'])),
+    ]
+
+
+class TestPositionalAfterOptionalOneOrMore(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=+"""
+    """http://bugs.python.org/file18328/test_pos_after_var_args.patch"""
+
+    argument_signatures = [Sig('-x', nargs='+'), Sig('y')]
+    failures = ['', '-x']
+    successes = [
+        ('-x foo bar', NS(x=['foo',], y='bar')),
+        ('-x foo bar baz', NS(x=['foo', 'bar'], y='baz')),
+        ('-x foo bar baz buzz', NS(x=['foo', 'bar', 'baz'], y='buzz')),
+    ]
+
+
+class TestPositionalsAfterOptionalsPlus(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=+
+    http://bugs.python.org/issue9338#msg111270
+    prototypical problem"""
+
+    argument_signatures = [
+        Sig('-w'),
+        Sig('-x', nargs='+'),
+        Sig('y', type=int),
+        Sig('z', nargs='*', type=int)]
+    failures = ['1 -x 2 3 -w 4 5 6' # error: unrecognized arguments: 5 6
+                # z consumed in 1st argument group '1'
+    ]
+    successes = [
+        # prototypical case for this issue
+        ('-w 1 -x 2 3 4 5', NS(w='1', x=['2', '3', '4'], y=5, z=[])),
+        ('-w 1 -x 2 3', NS(w='1', x=['2'], y=3, z=[])),
+        ('-w 1 -x 2 3 -w 4', NS(w='4', x=['2'], y=3, z=[])  ),
+        ('-x 1 2 -w 3', NS(w='3', x=['1'], y=2, z=[])),
+        ('-x 1 2 3 4 -w 5', NS(w='5', x=['1', '2', '3'], y=4, z=[])),
+        # strings that worked before
+        ('-w 1 -x2 3 4 5', NS(w='1', x=['2'], y=3, z=[4, 5])),
+        ('-w 1 2 -x 3 4 5', NS(w='1', x=['3', '4', '5'], y=2, z=[])),
+        ('-w 1 -x2 3', NS(w='1', x=['2'], y=3, z=[])),
+        ('-x 1 2 -w 3 4 5 6',NS(w='3', x=['1', '2'], y=4, z=[5, 6]) ),
+        ('-x 1 2 3 4 -w 5 6 7', NS(w='5', x=['1', '2', '3', '4'], y=6, z=[7])),
+        ('1 2 3 -x 4 5 -w 6', NS(w='6', x=['4', '5'], y=1, z=[2, 3])),
+        ('1 2 3', NS(w=None, x=None, y=1, z=[2, 3])),
+        ('1 -x 2 3 -w 4', NS(w='4', x=['2', '3'], y=1, z=[])),
+    ]
+
+
+class TestPositionalArgAfterOptionalOptional(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=?"""
+
+    argument_signatures = [
+        Sig('-x', nargs='?'),
+        Sig('y',type=int)]
+    failures = []
+    successes = [
+        ('-x 1', NS(x=None, y=1)),
+        ('-x 1 2', NS(x='1', y=2))
+    ]
+
+
+class TestPositionalArgAfterNargsOptionalZeroOrMore(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=*"""
+
+    argument_signatures = [
+        Sig('-x', nargs='*'),
+        Sig('y',type=int)]
+    failures = []
+    successes = [
+        ('-x 1', NS(x=[], y=1)),
+        ('-x 1 2', NS(x=['1'], y=2)),
+        ('-x 1 2 3',NS(x=['1', '2'], y=3))
+    ]
+
+
+class TestPositional2AfterOptionalZeroOrMore(ParserTestCase):
+    """Tests specifying a positional that follows an arg with nargs=*"""
+
+    argument_signatures = [
+        Sig('-x', nargs='*'),
+        Sig('y', type=int, nargs=2)]
+    failures = ['-x 1']
+    successes = [
+        ('-x 1 2', NS(x=[], y=[1,2])),
+        ('-x 1 2 3',NS(x=['1'], y=[2,3]))
+    ]
+
+
+class Test2PositionalsAfterOptionalsPlus(ParserTestCase):
+    """Tests specifying 2 positionals after optional with nargs=+"""
+
+    argument_signatures = [
+        Sig('-x', nargs='+'),
+        Sig('y', type=int, nargs=2),
+        Sig('z', type=int, nargs='+')]
+    failures = ['-x 1', '-x 1 2', '-x 1 2 3']
+    successes = [
+        ('-x 1 2 3 4', NS(x=['1'], y=[2,3], z=[4])),
+        ('-x 1 2 3 4 5', NS(x=['1','2'], y=[3,4], z=[5]))
+    ]
+
+
+class Test2PositionalsAfterOptionalPlus(ParserTestCase):
+    """Tests specifying 2 positionals that follow an arg with nargs=+"""
+
+    argument_signatures = [
+        Sig('-w', nargs='+'),
+        Sig('-x', nargs='+'),
+        Sig('y',type=int,nargs=2),
+        Sig('z',type=int,nargs='+')]
+    failures = ['-x 1', '-x 1 2', '-x 1 2 3','-w 1 -x 2 3 4']
+    successes = [
+        ('-x 1 2 3 4', NS(w=None, x=['1'], y=[2, 3], z=[4])),
+        ('-x 1 2 3 4 5', NS(w=None, x=['1', '2'], y=[3, 4], z=[5])),
+        ('-w 1 -x 2 3 4 5', NS(w=['1'], x=['2'], y=[3, 4], z=[5])),
+        ('-w 1 2 -x 3 4 5 6',NS(w=['1', '2'], x=['3'], y=[4, 5], z=[6])),
+        ('-w 1 2 3 -x 4 5 6', NS(w=['1'], x=['4', '5'], y=[2, 3], z=[6]))
+    ]
+
+
+class TestPositionalsAfterOptionalsComplex(ParserTestCase):
+    """Tests specifying positionals after optionals; complex case"""
+    """Something of a stress test"""
+
+    argument_signatures = [
+        Sig('-a', nargs='?'),
+        Sig('-b', nargs='+'),
+        Sig('-c', nargs='*'),
+        Sig('-j', action='store_true'),
+        Sig('-l'),
+        Sig('-m', nargs=1),
+        Sig('x', type=int),
+        Sig('y', type=int, nargs=2),
+        Sig('z', type=int, nargs='+')]
+    failures = []
+    successes = [('1 2 3 4 5', NS(a=None, b=None, c=None, j=False, l=None, m=None, x=1, y=[2, 3], z=[4, 5])),
+        ('-a 1 2 3 4 5', NS(a='1', b=None, c=None, j=False, l=None, m=None, x=2, y=[3, 4], z=[5])),
+        ('-a 1 -b 2 3 4 5 6', NS(a='1', b=['2'], c=None, j=False, l=None, m=None, x=3, y=[4, 5], z=[6])),
+        ('-a 1 -b 2 3 -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=False, l=None, m=None, x=5, y=[6, 7], z=[8])),
+        ('-a 1 -b 2 3 -j -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=True, l=None, m=None, x=5, y=[6, 7], z=[8])),
+        ('-a 1 -l L -b 2 3 -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=False, l='L', m=None, x=5, y=[6, 7], z=[8])),
+        ('-a 1 -l L -b 2 3 -m M -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=False, l='L', m=['M'], x=5, y=[6, 7], z=[8])),
+        ('-a 1 -l L -c 2 3 -m M -b 4 5 6 7 8', NS(a='1', b=['4'], c=['2', '3'], j=False, l='L', m=['M'], x=5, y=[6, 7], z=[8])),
+        ('-l L -a 1 -j -b 2 3 -c 4 5 6 7 8', NS(a='1', b=['2', '3'], c=['4'], j=True, l='L', m=None, x=5, y=[6, 7], z=[8])),
+        ('-l L -a 1 -j -b 2 3 4 -m M -c 5', NS(a=None, b=['2'], c=[], j=True, l='L', m=['M'], x=1, y=[3, 4], z=[5])),
+        ('-l L -a 1 -j -b 2 3 4 -m M -c 5 6 7', NS(a='1', b=['2', '3'], c=[], j=True, l='L', m=['M'], x=4, y=[5, 6], z=[7]))
+    ]
+
+class TestPositionalAfterOptionalRange(ParserTestCase):
+    """Tests specifying positional that follow an arg with nargs={}"""
+
+    argument_signatures = [
+        Sig('-x', nargs='{2,4}'),
+        Sig('y',type=int)
+    ]
+    failures = ['-x 1', '-x 1 2']
+    successes = [
+        ('-x 1 2 3', NS(x=['1','2'], y=3)),
+        ('-x 1 2 3 4', NS(x=['1','2','3'], y=4)),
+        ('-x 1 2 3 -- 4', NS(x=['1','2','3'], y=4)),
+        ('4 -x 1 2 3', NS(x=['1','2','3'], y=4)),
+    ]
+
+
+class TestPositionalAfterOptionalHalfRange1(ParserTestCase):
+    """Tests specifying positional that follow an arg with nargs={2,}"""
+
+    argument_signatures = [
+        Sig('-x', nargs='{2,}'),
+        Sig('y', type=int)
+    ]
+    failures = ['-x 1', '-x 1 2'] # # error expected 2 args; # error  following missing y
+    successes = [
+        ('-x 1 2 3', NS(x=['1','2'], y=3)),
+        ('-x 1 2 3 4', NS(x=['1','2','3'], y=4)),
+    ]
+
+
+class TestPositionalAfterOptionalHalfRange2(ParserTestCase):
+    """Tests specifying positional that follow an arg with nargs={,2}"""
+
+    argument_signatures = [
+        Sig('-x', nargs='{,2}'),
+        Sig('y', type=int)
+    ]
+    failures = ['-x 1 2 3 4']
+    successes = [
+        ('-x 1', NS(x=[], y=1)),
+        ('-x 1 2', NS(x=['1'], y=2)),
+        ('-x 1 2 3', NS(x=['1','2'], y=3)),
+    ]
+
+
+class TestPositionalRangeAfterOptionalRange(ParserTestCase):
+    """Tests specifying positional with {} that follow an arg with nargs={}"""
+
+    argument_signatures = [
+        Sig('-x', nargs='{1,3}'),
+        Sig('y', type=int, nargs='{2,}')
+    ]
+    failures = ['-x 1', '-x 1 2']
+    successes = [
+        ('-x 1 2 3', NS(x=['1'], y=[2, 3])),
+        ('-x 1 2 3 4 5 6', NS(x=['1', '2', '3'], y=[4, 5, 6])),
     ]
 
 
@@ -1255,6 +1565,56 @@ class TestNargsRemainder(ParserTestCase):
     ]
 
 
+class TestNargsOneOrMoreDeferred(ParserTestCase):
+    """Tests specifying a positional with nargs='*' that must be deferred"""
+
+    argument_signatures = [
+        Sig('-x', action='store_true'),
+        Sig('y'),
+        Sig('z', nargs='*'),
+    ]
+    failures = ['', '-x']
+    successes = [
+        ('Y', NS(x=False, y='Y', z=[])),
+        ('Y -x', NS(x=True, y='Y', z=[])),
+        ('Y -x Z Z', NS(x=True, y='Y', z=['Z', 'Z'])),
+    ]
+
+
+class TestNargsZeroOrOneDeferred(ParserTestCase):
+    """Tests specifying a positional with nargs='?' that must be deferred"""
+
+    argument_signatures = [
+        Sig('-x', action='store_true'),
+        Sig('y'),
+        Sig('z', nargs='?'),
+    ]
+    failures = ['', '-x']
+    successes = [
+        ('Y', NS(x=False, y='Y', z=None)),
+        ('Y -x', NS(x=True, y='Y', z=None)),
+        ('Y -x Z', NS(x=True, y='Y', z='Z')),
+    ]
+
+
+class TestNargsMultipleDeferred(ParserTestCase):
+    """Tests specifying a positional multiple nargs that must be deferred"""
+
+    argument_signatures = [
+        Sig('-w', action='store_true'),
+        Sig('x'),
+        Sig('y', nargs='?'),
+        Sig('z', nargs='*'),
+    ]
+    failures = ['', '-x']
+    successes = [
+        ('X', NS(w=False, x='X', y=None, z=[])),
+        ('X -w', NS(w=True, x='X', y=None, z=[])),
+        ('X -w Y', NS(w=True, x='X', y='Y', z=[])),
+        ('X -w Y Z', NS(w=True, x='X', y='Y', z=['Z'])),
+    ]
+
+
 class TestOptionLike(ParserTestCase):
     """Tests options that may or may not be arguments"""
 
@@ -1266,7 +1626,8 @@ class TestOptionLike(ParserTestCase):
     failures = ['-x', '-y2.5', '-xa', '-x -a',
                 '-x -3', '-x -3.5', '-3 -3.5',
                 '-x -2.5', '-x -2.5 a', '-3 -.5',
-                'a x -1', '-x -1 a', '-3 -1 a']
+                'a x -1', '-x -1 a', '-3 -1 a',
+                '-1E3']
     successes = [
         ('', NS(x=None, y=None, z=[])),
         ('-x 2.5', NS(x=2.5, y=None, z=[])),
@@ -1279,8 +1640,221 @@ class TestOptionLike(ParserTestCase):
         ('a -x 1', NS(x=1.0, y=None, z=['a'])),
         ('-x 1 a', NS(x=1.0, y=None, z=['a'])),
         ('-3 1 a', NS(x=None, y=1.0, z=['a'])),
+        # scientific notation should work
+        ('-3-.5e1', NS(x=None, y=-5.0, z=[])),
+        ('-x-0.5e1', NS(x=-5.0, y=None, z=[])),
     ]
 
+class TestScientificComplex(ParserTestCase):
+    """Tests scientific notation and complex"""
+
+    argument_signatures = [
+        Sig('--xdiv', nargs=2, type=float, default=[0,1]),
+        Sig('--zdiv', nargs=2, type=complex, default=argparse.SUPPRESS)
+    ]
+    failures = []
+    successes = [
+        ('', NS(xdiv=[0,1])),
+        ('--xdiv -.5 .5', NS(xdiv=[-0.5, 0.5])),
+        ('--xdiv -5e-1 5e-1', NS(xdiv=[-0.5, 0.5])),
+        ('--zdiv -1e-1-1j 5e1+3j', NS(xdiv=[0,1], zdiv=[(-0.1-1j), (50+3j)])),
+    ]
+
+class TestDefaultToPositional(ParserTestCase):
+    """Tests args_default_to_positional option"""
+
+    parser_signature = Sig(args_default_to_positional=True)
+    argument_signatures = [
+        Sig('--foo', nargs=2),
+        Sig('-a','--asciidoc-opts')
+    ]
+    failures = ['--asciidoc-opts --foo','--asciidoc-opts=--foo --foo - -a',
+    ]
+    successes = [
+        ('', NS(foo=None, asciidoc_opts=None)),
+        ('--foo one two', NS(foo=['one','two'], asciidoc_opts=None)),
+        ('--foo -one two', NS(foo=['-one','two'], asciidoc_opts=None)),
+        ('--asciidoc-opts --safe', NS(asciidoc_opts='--safe', foo=None)),
+        ('--asciidoc-opts=--safe', NS(asciidoc_opts='--safe', foo=None)),
+        ('-a--safe', NS(asciidoc_opts='--safe', foo=None)),
+        ('--asciidoc-opts=--foo --foo - -f', NS(asciidoc_opts='--foo', foo=['-', '-f'])),
+    ]
+
+class TestDefaultToPositionalWithOptionLike(ParserTestCase):
+    """Tests args_default_to_positional option with number-like options
+    compare to TestOptionLike"""
+
+    parser_signature = Sig(args_default_to_positional=True)
+
+    argument_signatures = [
+        Sig('-x', type=float),
+        Sig('-3', type=float, dest='y'),
+        Sig('z', nargs='*'),
+    ]
+    failures = [
+        '-x',
+        '-xa',
+        '-x -a',
+        '-x -3',
+        '-x -3.5',
+        '-3 -3.5',
+        ]
+    successes = [
+        # TestOptionLike successes remain successes
+        ('', NS(x=None, y=None, z=[])),
+        ('-x 2.5', NS(x=2.5, y=None, z=[])),
+        ('-x 2.5 a', NS(x=2.5, y=None, z=['a'])),
+        ('-3.5', NS(x=None, y=0.5, z=[])),
+        ('-3-.5', NS(x=None, y=-0.5, z=[])),
+        ('-3 .5', NS(x=None, y=0.5, z=[])),
+        ('a -3.5', NS(x=None, y=0.5, z=['a'])),
+        ('a', NS(x=None, y=None, z=['a'])),
+        ('a -x 1', NS(x=1.0, y=None, z=['a'])),
+        ('-x 1 a', NS(x=1.0, y=None, z=['a'])),
+        ('-3 1 a', NS(x=None, y=1.0, z=['a'])),
+        ('-3-.5e1', NS(x=None, y=-5.0, z=[])),
+        ('-x-0.5e1', NS(x=-5.0, y=None, z=[])),
+        # failure cases that have become successes
+        ('-y2.5', NS(x=None, y=None, z=['-y2.5'])),
+        ('-x -2.5', NS(x=-2.5, y=None, z=[])),
+        ('-x -2.5 a', NS(x=-2.5, y=None, z=['a'])),
+        ('-3 -.5', NS(x=None, y=-0.5, z=[])),
+        ('a x -1', NS(x=None, y=None, z=['a', 'x', '-1'])),
+        ('-x -1 a', NS(x=-1, y=None, z=['a'])),
+        ('-3 -1 a', NS(x=None, y=-1, z=['a'])),
+        ('-1E3', NS(x=None, y=None, z=['-1E3'])),
+    ]
+
+class TestOptparseLike(ParserTestCase):
+    """optparse TestStandard cases, without positionals"""
+    parser_signature = Sig()
+    # value of args_default_to_positional does not matter
+    argument_signatures = [
+       Sig("-a"),
+       Sig("-b", "--boo", type=int, dest='boo'),
+       Sig("--foo", action="append"),
+    ]
+    failures = ["-a", "-b 5x","--boo13","--boo=x5"]
+    successes = [
+        ('', NS(**{'a': None, 'boo': None, 'foo': None})),
+        # test_shortopt_empty_longopt_append
+        (["-a", "", "--foo=blah", "--foo="], #"-a  --foo=blah --foo=",
+            NS(**{'a': "", 'boo': None, 'foo': ["blah", ""]})),
+        # test_shortopt_empty_longopt_append
+        (["--foo", "bar", "--foo", "", "--foo=x"],
+            NS(**{'a': None, 'boo': None, 'foo': ["bar", "", "x"]})),
+        # test_long_option_append
+        (["--foo", "bar", "--foo", "", "--foo=x"],
+            NS(**{'a': None, 'boo': None, 'foo': ["bar", "", "x"]})),
+        # test_option_argument_joined
+        (["-abc"], NS(**{'a': "bc", 'boo': None, 'foo': None})),
+        # test_option_argument_split
+        (["-a", "34"], NS(**{'a': "34", 'boo': None, 'foo': None})),
+        # test_option_argument_joined_integer
+        (["-b34"], NS(**{'a': None, 'boo': 34, 'foo': None})),
+        # test_option_argument_split_negative_integer
+        (["-b", "-5"], NS(**{'a': None, 'boo': -5, 'foo': None})),
+        # test_long_option_argument_joined
+        (["--boo=13"], NS(**{'a': None, 'boo': 13, 'foo': None})),
+        # test_long_option_argument_split
+        (["--boo", "111"], NS(**{'a': None, 'boo': 111, 'foo': None})),
+        # test_long_option_short_option
+        (["--foo=bar", "-axyz"],
+            NS(**{'a': 'xyz', 'boo': None, 'foo': ["bar"]})),
+        # test_abbrev_long_option
+        (["--f=bar", "-axyz"],
+            NS(**{'a': 'xyz', 'boo': None, 'foo': ["bar"]})),
+        # test_short_and_long_option_split
+        (["-a", "xyz", "--foo", "bar"],
+            NS(**{'a': 'xyz', 'boo': None, 'foo': ["bar"]})),
+        # test_short_option_split_long_option_append
+        (["--foo=bar", "-b", "123", "--foo", "baz"],
+            NS(**{'a': None, 'boo': 123, 'foo': ["bar", "baz"]})),
+    ]
+
+class TestOptparseWithPositionalLike(ParserTestCase):
+    """optparse TestStandard cases, with positionals"""
+    # value of args_default_to_positional does not matter
+    parser_signature = Sig()
+    argument_signatures = [
+       Sig("-a"),
+       Sig("-b", "--boo", type=int, dest='boo'),
+       Sig("--foo", action="append"),
+       Sig("pos", nargs='*', default=argparse.SUPPRESS)
+    ]
+    failures = [
+        # test_short_option_consumes_separator
+        # even with default_to_positionals, '--' is still a separator
+        # (["-a", "--", "foo", "bar"],
+        #   NS(**{'a': "--", 'boo': None, 'foo': None, 'pos': ["foo", "bar"]})),
+        '-a -- foo bar',
+        # (["-a", "--", "--foo", "bar"],
+        #   NS(**{'a': "--", 'boo': None, 'foo': ["bar"]})),
+        '-a -- --foo bar',
+        # test_option_consumes_optionlike_string
+        # even with default_to_positionals, -b is not an argument
+        # (["-a", "-b3"], NS(**{'a': "-b3", 'boo': None, 'foo': None})),
+        '-a -b3'
+    ]
+    successes = [
+        # test_short_option_split_one_positional_arg
+        (["-a", "foo", "bar"],
+            NS(**{'a': "foo", 'boo': None, 'foo': None, 'pos': ["bar"]})),
+        # test_short_option_joined_and_separator
+        (["-ab", "--", "--foo", "bar"],
+            NS(**{'a': "b", 'boo': None, 'foo': None, 'pos': ["--foo", "bar"]})),
+        # test_hyphen_becomes_positional_arg
+        (["-ab", "-", "--foo", "bar"],
+            NS(**{'a': "b", 'boo': None, 'foo': ["bar"], 'pos': ["-"]})),
+        # test_no_append_versus_append
+        (["-b3", "-b", "5", "--foo=bar", "--foo", "baz"],
+            NS(**{'a': None, 'boo': 5, 'foo': ["bar", "baz"]})),
+    ]
+
+class TestDoubleDashRemoval(ParserTestCase):
+    """Test actions with multiple -- values"""
+
+    """argparse removed all '--'
+    a 3-2012 patch removed just the 1st -- of each positional group
+    this new patch removes just the 1st --
+    this change is most valuable when passing arg strings to another process"""
+    argument_signatures = [
+        Sig('-f', '--foo', help='an optional'),
+        Sig('cmd', help='a command'),
+        Sig('rest', nargs='*', help='zero or more args'),
+    ]
+    failures = [] # ['cmd --foo bar 1 2 3', 'cmd -f1 2 3']
+    successes = [
+        ('-f1 1 -- 2 3', NS(cmd='1', foo='1', rest=['2', '3'])),
+        ('cmd -- --foo bar', NS(cmd='cmd', foo=None, rest=['--foo', 'bar'])),
+        ('cmd -- --foo -- -f2', NS(cmd='cmd', foo=None, rest=['--foo', '--', '-f2'])),
+
+        ('-- --foo -- --bar 2', NS(cmd='--foo', foo=None, rest=['--', '--bar', '2'])),
+        # NS(cmd='--foo', foo=None, rest=['--bar', '2']) old
+
+        ('-f1 -- -- 1 -- 2', NS(cmd='--', foo='1', rest=['1', '--', '2'])),
+        # NS(cmd=[], foo='1', rest=['1', '2']) older, note cmd=[]
+        # NS(cmd='--', foo='1', rest=['1', '2']) old
+
+        ('-- cmd -- -- --foo', NS(cmd='cmd', foo=None, rest=['--', '--', '--foo'])),
+        # NS(cmd='cmd', foo=None, rest=['--foo'])  older
+        # NS(cmd='cmd', foo=None, rest=['--', '--foo']) old
+    ]
+
+class TestDoubleDashRemoval1(ParserTestCase):
+    """Test actions with multiple -- values, with '+' positional"""
+
+    argument_signatures = [
+        Sig('-f', '--foo', help='an optional'),
+        Sig('cmd', help='a command'),
+        Sig('rest', nargs='+', help='1 or more args'),
+    ]
+    failures = ['cmd -f1', '-f1 -- cmd', '-f1 cmd --']
+    successes = [
+        ('cmd -f1 2 3', NS(cmd='cmd', foo='1', rest=['2', '3'])),
+        ('cmd -f1 -- 2 3', NS(cmd='cmd', foo='1', rest=['2', '3'])),
+        ('-f1 -- cmd -- -f2 3', NS(cmd='cmd', foo='1', rest=['--', '-f2', '3'])),
+    ]
 
 class TestDefaultSuppress(ParserTestCase):
     """Test actions with suppressed defaults"""
@@ -1833,6 +2407,31 @@ class TestAddSubparsers(TestCase):
             args = args_str.split()
             self.assertArgumentParserError(self.parser.parse_args, args)
 
+    def test_parse_args_missing_cmd(self):
+        # test error msg when cmd is missing
+        for args_str,reg_str in [['0.5','the following arguments are required']]:
+            args = args_str.split()
+            self.assertRaisesRegex(ArgumentParserError, reg_str,
+                self.parser.parse_args, args)
+        # was - no error (effectively optional argument)
+
+    def test_parse_args_invalid_choice(self):
+        # test error msg when cmd is wrong choice
+        for args_str,reg_str in [['0.5 0','error: argument {1,2,3}: invalid choice:']]:
+            args = args_str.split()
+            self.assertRaisesRegex(ArgumentParserError, reg_str,
+                self.parser.parse_args, args)
+        # was - 'error: invalid choice:'
+
+    def test_required(self):
+        # test ability to change 'required'; default is True
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument('--foo', action='store_true')
+        subparsers = parser.add_subparsers(required=False)
+        parser1 = subparsers.add_parser('1')
+        parser1.add_argument('baz')
+        self.assertEqual(NS(foo=False), parser.parse_args([]))
+
     def test_parse_args(self):
         # check some non-failure cases:
         self.assertEqual(
@@ -2042,6 +2641,10 @@ class TestAddSubparsers(TestCase):
         parser = self._get_parser(aliases=True)
         self.assertArgumentParserError(parser.parse_args,
                                        '0.5 1alias3 b'.split())
+        # with metavar, the error message has not changed
+        self.assertRaisesRegex(ArgumentParserError,
+                'error: argument COMMAND: invalid choice:',
+                parser.parse_args, '0.5 1alias3 b'.split())
 
     def test_alias_help(self):
         parser = self._get_parser(aliases=True, subparser_help=True)
@@ -2065,6 +2668,124 @@ class TestAddSubparsers(TestCase):
                 2                   2 help
                 3                   3 help
             """))
+
+#===============
+# Subparsers ambiguity tests
+#===============
+
+class TestSubparserOptionals(TestCase):
+    """Test subparser arguments that may be ambiguous in base parser
+    argparse would issue
+    'error: ambiguous option: --foo could match --foo1, --foo2'
+    even though --foo is an argument of subparser
+    subparsers used to be required; but a change in required testing
+    changed that.
+    Test both ways with explicited 'required' attribute setting
+    """
+    def assertArgumentParserError(self, *args, **kwargs):
+        self.assertRaises(ArgumentParserError, *args, **kwargs)
+
+    def setUp(self):
+        parser = ErrorRaisingArgumentParser()
+        parser.scan = True # testing switch
+        parser.add_argument('--foo1','--bar1', action='store_true')
+        parser.add_argument('--foo2','--bar2', action='store_true')
+        subparsers = parser.add_subparsers(dest='cmd')
+        cmd1 = subparsers.add_parser('cmd1')
+        cmd1.add_argument('--foo', action='store_true')
+        cmd2 = subparsers.add_parser('cmd2')
+        # nested subparser
+        sub2 = cmd2.add_subparsers(dest='sub')
+        sub2.required = True
+        cmd21 = sub2.add_parser('cmd21')
+        cmd21.add_argument('--bar', action='store_true')
+        self.parser = parser
+        self.subparsers = subparsers
+
+    def test_parse_args_failures_required(self):
+        self.subparsers.required = True
+        for args_str in [
+            '',
+            '--foo1',
+            '--foo',
+            '--foo cmd1',
+            ]:
+            args = args_str.split()
+            self.assertArgumentParserError(self.parser.parse_args, args)
+
+    def test_parse_args_errormsg(self):
+        """test error message; issue arose because argparse used issue
+        rror: ambiguous option: --foo could match --foo1, --foo2"""
+        for args_str, regex in [
+            ['--foo', '[required|unrecognized]'],
+            ['--foo cmd1', 'unrecognized'],
+            ]:
+            args = args_str.split()
+            with self.assertRaises(ArgumentParserError) as cm:
+                self.parser.parse_args(args)
+            msg = str(cm.exception)
+            self.assertRegex(msg, regex)
+            self.assertNotRegex(msg, 'ambiguous option')
+
+    def test_parse_args_required(self):
+        self.subparsers.required = True
+        self.assertEqual(
+            self.parser.parse_args('cmd1 --foo'.split()),
+            NS(cmd='cmd1', foo=True, foo1=False, foo2=False),
+        )
+        self.assertEqual(
+            self.parser.parse_args('--foo1 cmd1 --foo'.split()),
+            NS(cmd='cmd1', foo=True, foo1=True, foo2=False),
+        )
+
+    def test_parse_args_failures_notrequired(self):
+        self.subparsers.required = False
+        for args_str in [
+            '--foo',
+            '--foo cmd1',
+            ]:
+            args = args_str.split()
+            self.assertArgumentParserError(self.parser.parse_args, args)
+
+    def test_parse_args_notrequired(self):
+        self.subparsers.required = False
+        self.assertEqual(
+            self.parser.parse_args('cmd1 --foo'.split()),
+            NS(cmd='cmd1', foo=True, foo1=False, foo2=False),
+        )
+        self.assertEqual(
+            self.parser.parse_args('--foo1 cmd1 --foo'.split()),
+            NS(cmd='cmd1', foo=True, foo1=True, foo2=False),
+        )
+
+    def test_parse_args_failures_sub(self):
+        "test that involves 2 levels of subparsers"
+        self.subparsers.required = True
+        for args_str in [
+            '',
+            '--bar1',
+            '--bar',
+            '--bar cmd2',
+            'cmd2 --bar cmd21',
+            '--bar1 cmd2 --bar',
+            ]:
+            args = args_str.split()
+            self.assertArgumentParserError(self.parser.parse_args, args)
+
+    def test_parse_args_sub(self):
+        """ensure that testing is recursive
+        without fix gives error
+        'ambiguous option: --bar could match --bar1, --bar2'
+        """
+        self.subparsers.required = True
+        self.assertEqual(
+            self.parser.parse_args('cmd2 cmd21 --bar'.split()),
+            NS(cmd='cmd2', bar=True, foo1=False, foo2=False, sub='cmd21'),
+        )
+        self.assertEqual(
+            self.parser.parse_args('--bar1 cmd2 cmd21 --bar'.split()),
+            NS(cmd='cmd2', bar=True, foo1=True, foo2=False, sub='cmd21'),
+        )
 
 # ============
 # Groups tests
@@ -2290,6 +3011,7 @@ class TestParentParsers(TestCase):
 
 class TestMutuallyExclusiveGroupErrors(TestCase):
 
+    @unittest.skip # title is now ok
     def test_invalid_add_argument_group(self):
         parser = ErrorRaisingArgumentParser()
         raises = self.assertRaises
@@ -2647,6 +3369,43 @@ class TestMutuallyExclusiveInGroup(MEMixin, TestCase):
           --baz BAZ   baz help
         '''
 
+class TestMutuallyExclusiveTitledGroup(MEMixin, TestCase):
+
+    def get_parser(self, required=None):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        mutex_group = \
+            parser.add_mutually_exclusive_group(required=required, \
+            title='Titled group', description='Group description')
+        mutex_group.add_argument('--bar', help='bar help')
+        mutex_group.add_argument('--baz', help='baz help')
+        return parser
+
+    failures = ['--bar X --baz Y', '--baz X --bar Y']
+    successes = [
+        ('--bar X', NS(bar='X', baz=None)),
+        ('--baz Y', NS(bar=None, baz='Y')),
+    ]
+    successes_when_not_required = [
+        ('', NS(bar=None, baz=None)),
+    ]
+
+    usage_when_not_required = '''\
+        usage: PROG [-h] [--bar BAR | --baz BAZ]
+        '''
+    usage_when_required = '''\
+        usage: PROG [-h] (--bar BAR | --baz BAZ)
+        '''
+    help = '''\
+
+        optional arguments:
+          -h, --help  show this help message and exit
+
+        Titled group:
+          Group description
+
+          --bar BAR   bar help
+          --baz BAZ   baz help
+        '''
 
 class TestMutuallyExclusiveOptionalsAndPositionalsMixed(MEMixin, TestCase):
 
@@ -2688,6 +3447,52 @@ class TestMutuallyExclusiveOptionalsAndPositionalsMixed(MEMixin, TestCase):
           -b          b help
           -c          c help
         '''
+
+
+class TestMutuallyExclusiveDefaults(MEMixin, TestCase):
+    '''Narrow seen_non_default_actions criteria:
+    _get_values() sets argument_values = action.default only for positionals
+    with empty strings and '?*' nargs.  Optionals with a value that equals
+    (or 'is') the default don't count
+    '''
+    def get_parser(self, required=None):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        group = parser.add_mutually_exclusive_group(required=required)
+        group.add_argument('--foo', default='test')
+        group.add_argument('--bar', default='test')
+        group.add_argument('--small', type=int, default=42)
+        group.add_argument('--large', type=int, default=257)
+        return parser
+
+    failures = ['--foo X --bar Y',
+                '--small 0 --large 34',
+                '--foo test --bar Y',
+                '--large 257 --foo X',
+                '--small 42 --foo X',
+                ]
+    successes = [
+        ('--foo X', NS(bar='test', foo='X', large=257, small=42)),
+        ('--small 42', NS(bar='test', foo='test', large=257, small=42)),
+    ]
+    successes_when_not_required = [
+        ('', NS(foo='test', bar='test', small=42, large=257)),
+    ]
+    usage_when_required = '''\
+        usage: PROG [-h] (--foo FOO | --bar BAR | --small SMALL | --large LARGE)
+        '''
+    usage_when_not_required = '''\
+        usage: PROG [-h] [--foo FOO | --bar BAR | --small SMALL | --large LARGE]
+        '''
+    help = '''\
+
+        optional arguments:
+          -h, --help     show this help message and exit
+          --foo FOO
+          --bar BAR
+          --small SMALL
+          --large LARGE
+        '''
+
 
 # =================================================
 # Mutually exclusive group in parent parser tests
@@ -3859,6 +4664,32 @@ class TestHelpTupleMetavar(HelpTestCase):
         '''
     version = ''
 
+class TestHelpPositionalTupleMetavar(HelpTestCase):
+    """Test specifying metavar of a positional as a tuple"""
+
+    parser_signature = Sig(prog='PROG')
+    argument_signatures = [
+        Sig('w', help='w', nargs='+', metavar=('W1', 'W2')),
+        Sig('x', help='x', nargs='*', metavar=('X1', 'X2')),
+        Sig('y', help='y', nargs=3, metavar=('Y1', 'Y2', 'Y3')),
+        Sig('z', help='z', nargs='?', metavar=('Z1', )),
+    ]
+    argument_group_signatures = []
+    usage = '''\
+        usage: PROG [-h] W1 [W2 ...] [X1 [X2 ...]] Y1 Y2 Y3 [Z1]
+        '''
+    help = usage + '''\
+
+        positional arguments:
+          W1|W2       w
+          X1|X2       x
+          Y1|Y2|Y3    y
+          Z1          z
+
+        optional arguments:
+          -h, --help  show this help message and exit
+        '''
+    version = ''
 
 class TestHelpRawText(HelpTestCase):
     """Test the RawTextHelpFormatter"""
@@ -4118,6 +4949,46 @@ class TestHelpMetavarTypeFormatter(HelpTestCase):
     version = ''
 
 
+class TestHelpMetavarArgumentsInnerBracketSplitLines(HelpTestCase):
+    """"""
+
+    def custom_type(string):
+        return string
+
+    parser_signature = Sig(prog='PROG')
+    long_a = 'a' * 60
+    long_d = 'd' * 60
+    argument_signatures = [Sig('--a', metavar=long_a),
+                           Sig('--b', metavar='[innerpart]outerpart'),
+                           Sig('--c'),
+                           Sig('d', metavar=long_d),
+                           Sig('e', metavar='[innerpart2]outerpart2'),
+                           Sig('f'),
+                           ]
+    argument_group_signatures = []
+    usage = '''\
+       usage: PROG [-h]
+                   [--a {0}]
+                   [--b [innerpart]outerpart] [--c C]
+                   {1}
+                   [innerpart2]outerpart2 f
+       '''.format(long_a, long_d)
+    help = usage + '''\
+
+       positional arguments:
+         {0}
+         [innerpart2]outerpart2
+         f
+
+       optional arguments:
+         -h, --help            show this help message and exit
+         --a {1}
+         --b [innerpart]outerpart
+         --c C
+       '''.format(long_d, long_a)
+    version = ''
+
+
 # =====================================
 # Optional/Positional constructor tests
 # =====================================
@@ -4250,6 +5121,40 @@ class TestInvalidArgumentConstructors(TestCase):
                           action=Action, default=Success, const=Success)
         self.assertRaises(Success, parser.add_argument, 'spam',
                           action=Action, default=Success, const=Success)
+
+    def test_nargs_value(self):
+        """test for invalid values of nargs, not integer or accepted string
+        tests parser and groups"""
+        error_msg = r"nargs (.*) not integer or"
+        error_msg = r"argument --foo: nargs (.*) not integer or \[(.*)\]"
+        error_type = argparse.ArgumentError
+        parser = ErrorRaisingArgumentParser()
+        group = parser.add_argument_group('g')
+        m = parser.add_mutually_exclusive_group()
+
+        with self.assertRaisesRegex(error_type, error_msg):
+            parser.add_argument('--foo', nargs='1')
+        with self.assertRaisesRegex(error_type, error_msg):
+            group.add_argument('--foo', nargs='**')
+        with self.assertRaisesRegex(error_type, error_msg):
+            m.add_argument('--foo', nargs='1')
+
+    def test_nargs_metavar_tuple(self):
+        "test that metavar tuple matches with nargs; test parser and groups"
+        error_msg = r'length of metavar tuple does not match nargs'
+        error_type = ValueError
+        error_msg = r'argument (.*): length of metavar tuple does not match nargs'
+        error_type = argparse.ArgumentError
+        parser = ErrorRaisingArgumentParser()
+        group = parser.add_argument_group('g')
+        m = parser.add_mutually_exclusive_group()
+
+        with self.assertRaisesRegex(error_type, error_msg):
+            parser.add_argument('-w', help='w', nargs='+', metavar=('W1',))
+        with self.assertRaisesRegex(error_type, error_msg):
+            group.add_argument('-x', help='x', nargs='*', metavar=('X1', 'X2', 'x3'))
+        with self.assertRaisesRegex(error_type, error_msg):
+            m.add_argument('-y', help='y', nargs=3, metavar=('Y1', 'Y2'))
 
 # ================================
 # Actions returned by add_argument
@@ -4606,6 +5511,22 @@ class TestMessageContentError(TestCase):
         self.assertRegex(msg, 'req_pos')
         self.assertNotIn(msg, 'optional_positional')
 
+    def test_positional_metavars(self):
+        """issue 14074 -
+        bad error message: TypeError: sequence item 0: expected str instance, tuple found
+        that is, it could not convert a tuple metavar as a string
+        test that proper 'arguments are required' error
+        """
+        parser = ErrorRaisingArgumentParser(prog='PROG', usage='')
+        parser.add_argument('pos', nargs=2, metavar=('A', 'B'))
+        parser.add_argument('star', nargs='*', metavar=('A', 'B'))
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args([])
+        msg = str(cm.exception)
+        self.assertRegex(msg, 'the following arguments are required')
+        #self.assertRegex(msg, 'A B')
+        #self.assertRegex(msg, r'\[A \[B \.\.\.\]\]')
+        self.assertRegex(msg, r'A\|B')
 
 # ================================================
 # Check that the type function is called only once
@@ -4714,25 +5635,121 @@ class TestParseKnownArgs(TestCase):
         self.assertEqual(NS(v=3, spam=True, badger="B"), args)
         self.assertEqual(["C", "--foo", "4"], extras)
 
+# ===========================
+# parse_intermixed_args tests
+# ===========================
+
+class TestIntermixedArgs(TestCase):
+    def test_basic(self):
+        # test parsing intermixed optionals and positionals
+        parser = argparse.ArgumentParser(prog='PROG')
+        parser.add_argument('--foo', dest='foo')
+        bar = parser.add_argument('--bar', dest='bar', required=True)
+        cmd = parser.add_argument('cmd')
+        rest = parser.add_argument('rest', nargs='*', type=int)
+        argv = 'cmd --foo x 1 --bar y 2 3'.split()
+        args = parser.parse_intermixed_args(argv)
+        # rest gets [1,2,3] despite the foo and bar strings
+        self.assertEqual(NS(bar='y', cmd='cmd', foo='x', rest=[1, 2, 3]), args)
+
+        args, extras = parser.parse_known_args(argv)
+        # cannot parse the '1,2,3'
+        #self.assertEqual(NS(bar='y', cmd='cmd', foo='x', rest=[]), args)
+        #self.assertEqual(["1", "2", "3"], extras)
+        self.assertEqual(NS(bar='y', cmd='cmd', foo='x', rest=[1]), args)
+        self.assertEqual(["2", "3"], extras)
+
+        argv = 'cmd --foo x 1 --error 2 --bar y 3'.split()
+        args, extras = parser.parse_known_intermixed_args(argv)
+        # unknown optionals go into extras
+        self.assertEqual(NS(bar='y', cmd='cmd', foo='x', rest=[1]), args)
+        self.assertEqual(['--error', '2', '3'], extras)
+
+        # restores attributes that were temporarily changed
+        self.assertIsNone(parser.usage)
+        self.assertEqual(bar.required, True)
+        self.assertEqual(cmd.required, True)
+        self.assertEqual(cmd.nargs, None)
+        self.assertEqual(rest.required, True) # *, no default
+
+    def test_remainder(self):
+        # Intermixed and remainder are incompatible
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument('-z')
+        parser.add_argument('x')
+        parser.add_argument('y', nargs='...')
+        argv = 'X A B -z Z'.split()
+        # intermixed fails with '...' (also 'A...')
+        # self.assertRaises(TypeError, parser.parse_intermixed_args, argv)
+        with self.assertRaises(TypeError) as cm:
+            parser.parse_intermixed_args(argv)
+        self.assertRegex(str(cm.exception), '\.\.\.')
+
+    def test_exclusive(self):
+        # mutually exclusive group; intermixed works fine
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        group = parser.add_mutually_exclusive_group(required=True)
+        group.add_argument('--foo', action='store_true', help='FOO')
+        group.add_argument('--spam', help='SPAM')
+        parser.add_argument('badger', nargs='*', default='X', help='BADGER')
+        args = parser.parse_intermixed_args('1 --foo 2'.split())
+        self.assertEqual(NS(badger=['1', '2'], foo=True, spam=None), args)
+        self.assertRaises(ArgumentParserError, parser.parse_intermixed_args, '1 2'.split())
+        self.assertEqual(group.required, True)
+
+    def test_exclusive_incompatible(self):
+        # mutually exclusive group including positional - fail
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        group = parser.add_mutually_exclusive_group(required=True)
+        group.add_argument('--foo', action='store_true', help='FOO')
+        group.add_argument('--spam', help='SPAM')
+        group.add_argument('badger', nargs='*', default='X', help='BADGER')
+        self.assertRaises(TypeError, parser.parse_intermixed_args, [])
+        self.assertEqual(group.required, True)
+
+class TestIntermixedMessageContentError(TestCase):
+    # case where Intermixed gives different error message
+    # error is raised by 1st parsing step
+    def test_missing_argument_name_in_message(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG', usage='')
+        parser.add_argument('req_pos', type=str)
+        parser.add_argument('-req_opt', type=int, required=True)
+
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args([])
+        msg = str(cm.exception)
+        self.assertRegex(msg, 'req_pos')
+        self.assertRegex(msg, 'req_opt')
+
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_intermixed_args([])
+        msg = str(cm.exception)
+        self.assertNotRegex(msg, 'req_pos')
+        self.assertRegex(msg, 'req_opt')
+
 # ==========================
 # add_argument metavar tests
 # ==========================
 
 class TestAddArgumentMetavar(TestCase):
 
-    EXPECTED_MESSAGE = "length of metavar tuple does not match nargs"
+    EXPECTED_MESSAGE = "argument --foo: length of metavar tuple does not match nargs"
+    EXPECTED_ERROR = argparse.ArgumentError
 
     def do_test_no_exception(self, nargs, metavar):
         parser = argparse.ArgumentParser()
         parser.add_argument("--foo", nargs=nargs, metavar=metavar)
 
+    #def do_test_exception(self, nargs, metavar):
+    #    parser = argparse.ArgumentParser()
+    #    with self.assertRaises(ValueError) as cm:
+    #        parser.add_argument("--foo", nargs=nargs, metavar=metavar)
+    #    self.assertEqual(cm.exception.args[0], self.EXPECTED_MESSAGE)
+
     def do_test_exception(self, nargs, metavar):
         parser = argparse.ArgumentParser()
-        with self.assertRaises(ValueError) as cm:
+        with self.assertRaisesRegex(self.EXPECTED_ERROR, self.EXPECTED_MESSAGE):
             parser.add_argument("--foo", nargs=nargs, metavar=metavar)
-        self.assertEqual(cm.exception.args[0], self.EXPECTED_MESSAGE)
-
-    # Unit tests for different values of metavar when nargs=None
 
     def test_nargs_None_metavar_string(self):
         self.do_test_no_exception(nargs=None, metavar="1")
@@ -4884,6 +5901,315 @@ class TestAddArgumentMetavar(TestCase):
 
     def test_nargs_3_metavar_length3(self):
         self.do_test_no_exception(nargs=3, metavar=("1", "2", "3"))
+
+# ============================
+# test when nargs is range
+# ============================
+
+class TestNargsRangeAddArgument(TestCase):
+    """Test processing nargs when range ((m,n) or {m,n}) is set"""
+    def test1(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=() )
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=(1,) )
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=('xxx', None))
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=(None, 'xxx'))
+        with self.assertRaises(argparse.ArgumentError):
+            parser.add_argument('-a', nargs=(8, 3))
+
+    def test_add_argument5(self):
+        "nargs = (lo, hi), where lo < hi"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        arg = parser.add_argument('-a', nargs=(3,5))
+        self.assertEqual(arg.nargs, '{3,5}')
+
+
+    def test_add_argument11(self):
+        "nargs = (None, number) => (0, number)"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        arg = parser.add_argument('-a', nargs=(None, 87))
+        self.assertEqual(arg.nargs, '{,87}')
+
+class TestNargumentRangeArgumentParsing(ParserTestCase):
+    "Test parsing arguments when nargs sets range of options count"
+
+    argument_signatures = [Sig('positional', nargs='*'),
+        Sig('-o','--optional'),
+        Sig('--foo', nargs=(3,7))]
+    failures = ["--foo aa bb -o cc dd ee ff gg hh",
+    "--foo -o aa bb cc dd ee ff gg hh"]
+    successes = [
+        ('--foo aa bb cc dd ee ff gg hh',
+        NS(foo='aa bb cc dd ee ff gg'.split(), optional=None, positional=['hh'])),
+        ('--foo aa bb cc dd -o ee ff gg hh',
+        NS(foo='aa bb cc dd'.split(),
+           positional='ff gg hh'.split(),
+           optional='ee')),
+    ]
+
+class TestNargumentRangeArgumentParsing5(ParserTestCase):
+    "Test parsing arguments when nargs sets range of options count"
+
+    argument_signatures = [Sig('positional', nargs='*'),
+        Sig('-o','--optional'),
+        Sig('--foo', nargs=(3,None))]
+    failures = ["--foo aa bb -o cc dd ee ff gg hh ii -o jj kk"]
+    successes = [
+        ('--foo aa bb cc dd ee ff gg hh ii -o jj kk',
+        NS(foo='aa bb cc dd ee ff gg hh ii'.split(), optional='jj', positional=['kk'])),
+    ]
+
+class TestNargsRange1(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{2,4}', type=int),
+        Sig('rest', nargs='*')]
+    failures = ['1']
+    successes = [
+        ('1 2', NS(pos=[1,2], rest=[])),
+        ('1 2 3', NS(pos=[1,2,3], rest=[])),
+        ('1 2 3 4', NS(pos=[1,2,3,4], rest=[])),
+        ('1 2 3 4 bar', NS(pos=[1,2,3,4], rest=['bar'])),
+        ]
+
+class TestNargsRange2(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{2,4}', type=int),
+        Sig('rest')]
+    failures = ['1', '1 2', ]
+    successes = [
+        ('1 2 bar', NS(pos=[1,2], rest='bar')),
+        ('1 2 3', NS(pos=[1,2], rest='3')),
+        ('1 2 3 4', NS(pos=[1,2,3], rest='4')),
+        ('1 2 3 4 bar', NS(pos=[1,2,3,4], rest='bar')),
+        ]
+    # usage: [-h] 'pos',{2,4}\n\npositional arguments:\n  pos\n\noptional arguments:\n  -h, --help  show this help message and exit\n
+
+class TestNargsRange3(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{2,}', type=int)]
+    failures = ['', '1']
+    successes = [
+        ('1 2', NS(pos=[1,2])),
+        ('1 2 3 4 5 6', NS(pos=[1,2,3,4,5,6])),
+        ]
+
+class TestNargsRange4(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{,2}', type=int)]
+    failures = ['1 2 3']
+    successes = [
+        ('', NS(pos=[])),
+        ('1', NS(pos=[1])),
+        ('1 2', NS(pos=[1,2])),
+        ]
+
+class TestNargsRange5(ParserTestCase):
+    argument_signatures = [Sig('pos', nargs='{2,2}', type=int)]
+    failures = ['','1','1 2 3']
+    successes = [
+        ('1 2', NS(pos=[1,2])),
+        ]
+
+class TestNargsRange6(ParserTestCase):
+    # a range positional with other variable positional
+    argument_signatures = [Sig('foo', type=int),
+    Sig('range', nargs='{2,3}', type=int),
+    Sig('rest', nargs='+', type=int)]
+    failures = ['','1','1 2','1 2 3']
+    successes = [
+        ('1 2 3 4', NS(rest=[4], foo=1, range=[2,3])),
+        ('1 2 3 4 5', NS(rest=[5], foo=1, range=[2,3,4])),
+        ('1 2 3 4 5 6', NS(rest=[5,6], foo=1, range=[2,3,4])),
+        ]
+
+class TestNargsRange7(ParserTestCase):
+    # a range positional with other variable positional
+    # a custom action that checks range is not quite the same
+    class Custom(argparse.Action):
+        def __call__(self, parser, namespace, values, option_string=None):
+            if 2<=len(values)<=3:
+                setattr(namespace, self.dest, values)
+            else:
+                raise ArgumentParserError('not in range(2,3)')
+    argument_signatures = [Sig('foo', type=int),
+    Sig('range', nargs='+', type=int, action=Custom),
+    Sig('rest', nargs='+', type=int)]
+    failures = ['','1','1 2','1 2 3','1 2 3 4 5 6']
+    successes = [
+        ('1 2 3 4', NS(rest=[4], foo=1, range=[2,3])),
+        ('1 2 3 4 5', NS(rest=[5], foo=1, range=[2,3,4])),
+        ]
+
+class TestNargsRange1a(ParserTestCase):
+    # a custom action that checks range is not quite the same
+    class Custom(argparse.Action):
+        def __call__(self, parser, namespace, values, option_string=None):
+            if 2<=len(values)<=4:
+                setattr(namespace, self.dest, values)
+            else:
+                raise ArgumentParserError('not in range(2,3)')
+    argument_signatures = [Sig('pos', nargs='+', type=int, action=Custom),
+        Sig('rest', nargs='*')]
+    failures = ['1','1 2 3 4 bar']
+    successes = [
+        ('1 2', NS(pos=[1,2], rest=[])),
+        ('1 2 3', NS(pos=[1,2,3], rest=[])),
+        ('1 2 3 4', NS(pos=[1,2,3,4], rest=[])),
+        #('1 2 3 4 bar', NS(pos=[1,2,3,4], rest=['bar'])),
+        ]
+
+# ==========================
+# metavar with ()
+# ==========================
+
+class TestMetavarWithParen(TestCase):
+    "MutuallyExclusiveGroup trimming should not remove () from metavars"
+    def test_default_formatting(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", type=int, choices=range(10))
+        cm = parser.format_usage()
+        self.assertRegex(cm, r"\[-h\] \[--foo {0,1,2,3,4,5,6,7,8,9}\]\n")
+
+    def test_format_with_metavar(self):
+        # represent choices with the metavar
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", type=int, choices=range(20), metavar='range 20')
+        cm = parser.format_usage()
+        self.assertRegex(cm, r'usage: (.*) \[\-h\] \[--foo range 20\]\n')
+
+    def test_format_with_paren_usage(self):
+        # test a fix that preserves () in the metavar
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", type=int, choices=range(20), metavar='range(0,20)')
+        cm = parser.format_usage()
+        self.assertRegex(cm, r'usage: (.*) \[-h\] \[--foo range\(0,20\)\]\n')
+
+    def test_format_with_summarize(self):
+        # the metavar has no effect on the error message
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", type=int, choices=range(20), metavar='range(0,20)')
+        self.assertEqual(parser.parse_args(['--foo','1']), NS(foo=1))
+
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args(['--foo','21'])
+        msg = str(cm.exception)
+        self.assertRegex(msg, r'invalid choice')
+        self.assertNotIn(msg, r'range\(0,20\)')
+        # range large enough to trigger list summarizing
+        self.assertRegex(msg, r'choose from {0,1,2,3,4,5,...,18,19}')
+
+    def test_format_with_paren_help(self):
+        # %(choices)s in help, prefer default over metavar
+        # this feature is not documented
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", type=int, choices=list(range(10)),
+            metavar='range(0,10)', help='int from %(choices)s')
+        cm = parser.format_help()
+        #print(cm)
+        self.assertRegex(cm, r'--foo range\(0,10\)  int from 0, 1, 2, 3, 4, 5, 6, 7, 8, 9')
+
+# ==========================
+# Non iterable choices
+# ==========================
+
+class TestNonIterableChoices(TestCase):
+    # partial test of Issue 16418 and 16468
+    # choices is a container with __contains__ but not __iter__
+    # so words with the 'in' operator, but not 'for in'
+    class NonIterableContainer:
+        def __init__(self, container, description):
+            self.container = container
+            self.description = description
+        def __repr__(self):
+            return self.description
+        def __contains__(self, item):
+            return item in self.container
+    abcChoices = NonIterableContainer(['a','b','c'], 'NIC(abc)')
+
+    def test_use_of_repr(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument('--foo', choices=self.abcChoices)
+        self.assertEqual(parser.parse_args(['--foo','a']), NS(foo='a'))
+        cm = parser.format_usage()
+        self.assertRegex(cm, r'NIC\(abc\)')
+
+    def test_use_of_metavar(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument('--foo', choices=self.abcChoices, metavar='NIC(abc)')
+        self.assertEqual(parser.parse_args(['--foo','a']), NS(foo='a'))
+        cm = parser.format_usage()
+        self.assertRegex(cm, r'\[--foo NIC\(abc\)\]')
+
+    @unittest.skip("fixed error message")
+    def test_parse_TypeError(self):
+        # error here should be addressed by issue 16468
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument('--foo', choices=self.abcChoices, metavar='NIC(abc)')
+        self.assertEqual(parser.parse_args(['--foo','a']), NS(foo='a'))
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args(['--foo','d'])
+        msg = str(cm.exception)
+        self.assertRegex(msg, "'NonIterableContainer' object is not iterable")
+
+    def test_parse_ArgumentError(self):
+        # error here should be addressed by issue 16468
+        # for code that returns an ArgumentError rather than TypeError
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument('--foo', choices=self.abcChoices, metavar='NIC(abc)')
+        self.assertEqual(parser.parse_args(['--foo','a']), NS(foo='a'))
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args(['--foo','d'])
+        msg = str(cm.exception)
+        self.assertRegex(msg, r"invalid choice: 'd' \(choose from NIC\(abc\)\)")
+
+
+class TestBareChoices(TestCase):
+    # test a choices object that does not accept the in operator
+    # add_argument should raise error
+    class Bare:
+        def __repr__(self):
+            return 'BareObject'
+    def test_error_raising(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        with self.assertRaises(argparse.ArgumentError) as cm:
+            parser.add_argument('--foo', type=int,choices=self.Bare())
+        msg = str(cm.exception)
+        self.assertRegex(msg, 'choices must support the in operator')
+
+# ==========================
+# string choices
+# ==========================
+
+class TestStringChoices(TestCase):
+    "string choices are flaky"
+    def test_format_expands_to_list(self):
+        full = r"\[-h\] \[--foo {a,b,c}\]\n"
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", choices='abc')
+        cm = parser.format_usage()
+        self.assertRegex(cm, full)
+
+    def test_parse_admits_substring_not(self):
+        # 'bc' in 'abc' is True, but 'bc' in list('abc') is not
+        # _check_value now converts 'abc' to list
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", choices='abc')
+        self.assertEqual(parser.parse_args(['--foo','a']), NS(foo='a'))
+        #self.assertEqual(parser.parse_args(['--foo','bc']), NS(foo='bc'))
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args(['--foo','bc'])
+        msg = str(cm.exception)
+        self.assertRegex(msg, "invalid choice: 'bc' \(choose from {a,b,c}\)")
+
+    def test_parse_list_does_not_admit_substring(self):
+        parser = ErrorRaisingArgumentParser(prog='PROG')
+        parser.add_argument("--foo", choices=list('abc'))
+        self.assertEqual(parser.parse_args(['--foo','a']), NS(foo='a'))
+        # self.assertEqual(parser.parse_args(['--foo','bc']), NS(foo='bc'))
+        with self.assertRaises(ArgumentParserError) as cm:
+            parser.parse_args(['--foo','bc'])
+        msg = str(cm.exception)
+        self.assertRegex(msg, "invalid choice: 'bc' \(choose from {a,b,c}\)")
 
 # ============================
 # from argparse import * tests
