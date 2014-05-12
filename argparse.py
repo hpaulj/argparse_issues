@@ -748,7 +748,7 @@ class ListProgHelpFormatter(HelpFormatter):
     usage that takes 'prog' as a list
     """
     def _format_usage(self, usage, actions, groups, prefix, aslist=False):
-        print('_format_usage',self._prog, type(self._prog))
+        #print('_format_usage',self._prog, type(self._prog))
         usage_parts = []
         if isinstance(self._prog, list):
             prog_list = self._prog
@@ -1269,6 +1269,11 @@ class _SubParsersAction(Action):
 
     def add_parser(self, name, **kwargs):
         # set prog from the existing prefix
+
+        d = self.parser_args.copy()
+        d.update(kwargs)
+        kwargs = d
+
         if kwargs.get('prog') is None:
             kwargs['prog'] = '%s %s' % (self._prog_prefix, name)
             if isinstance(self._prog_prefix, list):
@@ -1921,11 +1926,25 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 prog = formatter._format_usage(self.usage, actions, groups, '',aslist=True)
                 kwargs['prog'] = prog
 
+        def parser_share_kwargs(self):
+            # get selected attributes from self
+            # ones that a subparser might use
+            keys =['formatter_class',
+                   'prefix_chars',
+                   'conflict_handler',
+                   'allow_abbrev',
+                   'args_default_to_positional']
+            kwargs = {}
+            for k  in keys:
+                value = getattr(self, k, None)
+                kwargs[k] = value
+            return kwargs
+
         # create the parsers action and add it to the positionals list
         parsers_class = self._pop_action_class(kwargs, 'parsers')
         action = parsers_class(option_strings=[], **kwargs)
         self._subparsers._add_action(action)
-
+        action.parser_args = parser_share_kwargs(self)
         # return the created parsers action
         return action
 
