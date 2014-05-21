@@ -1,8 +1,16 @@
 import argparse
 
+def foo(**kwargs):
+    # class 'factory' used to give extra parameters
+    def bar(prog):
+        cls = argparse.ListProgHelpFormatter
+        return cls(prog, **kwargs)
+    return bar
+
 parser = argparse.ArgumentParser(prog='LongName',
     prefix_chars='-+',
-    formatter_class=argparse.ListProgHelpFormatter)
+    formatter_class=foo(width=40))
+    # formatter_class=argparse.ListProgHelpFormatter)
 parser.add_argument('--foobar', nargs=6, required=True)
 parser.add_argument('positional', nargs='+', metavar='FOO')
 parser.add_argument('--testing', nargs='*', metavar=('A','B'), required=True)
