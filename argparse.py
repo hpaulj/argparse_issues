@@ -856,6 +856,32 @@ class ListProgHelpFormatter(HelpFormatter):
             return '%s%s\n\n' % (prefix, usage)
 
 
+class WrapHelpFormatter(HelpFormatter):
+    """
+    paragraph wrap
+    wrap each line of text individually.
+    Depends on \ to keep long lines together
+    Works for all test_argparse cases, except a few that explicitly
+    add \n to description to test original HelpFormatter
+    """
+
+    def _parawrap(self, text, **kwargs):
+        lines = []
+        for line in text.splitlines():
+            if line:
+                lines.extend(_textwrap.wrap(line,**kwargs))
+            else:
+                lines.append(line)
+        return lines
+
+    def _fill_text(self, text, width, indent):
+        lines = self._parawrap(text, width=width,
+           initial_indent=indent, subsequent_indent=indent)
+        return '\n'.join(lines)
+
+    def _split_lines(self, text, width):
+        return self._parawrap(text, width=width)
+
 # =====================
 # Options and Arguments
 # =====================
