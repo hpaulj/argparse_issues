@@ -91,6 +91,7 @@ import sys as _sys
 import textwrap as _textwrap
 
 from gettext import gettext as _, ngettext
+from functools import partial as _partial
 
 
 SUPPRESS = '==SUPPRESS=='
@@ -136,6 +137,10 @@ def _ensure_value(namespace, name, value):
         setattr(namespace, name, value)
     return getattr(namespace, name)
 
+class _DelayedValue(_partial):
+    """Subclass this to reliably identify a particular use of partial
+    """
+    pass
 
 # ===============
 # Formatting Help
@@ -1734,7 +1739,11 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             if action.dest is not SUPPRESS:
                 if not hasattr(namespace, action.dest):
                     if action.default is not SUPPRESS:
-                        setattr(namespace, action.dest, action.default)
+                        default = action.default
+                        if isinstance(action.default, str):
+                            default = _DelayedValue(self._get_value, action, default)
+                            default.__name__ = 'delayed_get_value'
+                        setattr(namespace, action.dest, default)
 
         # add any parser defaults that aren't present
         for dest in self._defaults:
@@ -1965,6 +1974,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 if action.required:
                     required_actions.append(_get_action_name(action))
                 else:
+                    """
                     # Convert action default now instead of doing it before
                     # parsing arguments to avoid calling convert functions
                     # twice (which may fail) if the argument was given, but
@@ -1975,6 +1985,13 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                         action.default is getattr(namespace, action.dest)):
                         setattr(namespace, action.dest,
                                 self._get_value(action, action.default))
+                    """
+                    # evaluate the value in the namespace if it is a
+                    # wrapped _get_value function
+                    value = getattr(namespace, action.dest, None)
+                    if isinstance(value, _DelayedValue):
+                        assert value.func.__name__=='_get_value'
+                        setattr(namespace, action.dest, value())
 
         if required_actions:
             self.error(_('the following arguments are required: %s') %

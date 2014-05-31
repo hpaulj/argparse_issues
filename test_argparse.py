@@ -4623,6 +4623,30 @@ class TestTypeFunctionCallOnlyOnce(TestCase):
         args = parser.parse_args('--foo spam!'.split())
         self.assertEqual(NS(foo='foo_converted'), args)
 
+    def test_type_function_call_only_once_default(self):
+        # test that default is evaluated only once
+        # how?
+        def spam(string_to_convert):
+            self.assertEqual(string_to_convert, 'bar')
+            return 'foo_converted'
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--foo', type=spam, default='bar')
+        args = parser.parse_args([])
+        self.assertEqual(NS(foo='foo_converted'), args)
+
+    def test_type_function_call_partial(self):
+        # test that partial default is ok
+        from functools import partial
+        parser = argparse.ArgumentParser()
+        arg1 = parser.add_argument('--foo', type=int, default='123')
+        args = parser.parse_args([])
+        self.assertEqual(NS(foo=123), args)
+        arg1.default = partial(int, '123')
+        args = parser.parse_args([])
+        self.assertTrue(isinstance(args.foo, partial))
+        self.assertEqual(args.foo(), 123)
+
 # ==================================================================
 # Check semantics regarding the default argument and type conversion
 # ==================================================================
