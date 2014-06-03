@@ -73,6 +73,7 @@ __all__ = [
     'RawTextHelpFormatter',
     'MetavarTypeHelpFormatter',
     'CompactHelpFormatter',
+    'MultiGroupHelpFormatter',
     'Namespace',
     'Action',
     'ONE_OR_MORE',
@@ -775,13 +776,17 @@ class MultiGroupHelpFormatter(HelpFormatter):
         # if optionals and positionals are available, calculate usage
         elif usage is None:
             prog = '%(prog)s' % dict(prog=self._prog)
-            optionals = [action for action in actions if action.option_strings]
-            positionals = [action for action in actions if not action.option_strings]
+            #optionals = [action for action in actions if action.option_strings]
+            #positionals = [action for action in actions if not action.option_strings]
 
             # build full usage string
             format = self._format_actions_usage
-            (opt_parts, pos_parts) = format(optionals + positionals, groups)
-            usage = ' '.join([s for s in [prog]+opt_parts+pos_parts if s])
+            # (opt_parts, pos_parts) = format(optionals + positionals, groups)
+            (opt_parts, arg_parts, pos_parts) = format(actions, groups)
+            all_parts = opt_parts + arg_parts + pos_parts
+
+            usage = ' '.join([prog]+all_parts)
+            opt_parts = opt_parts + arg_parts # for now join these
 
             # the rest is the same as in the parent formatter
             # wrap the usage parts if it's too long
@@ -842,35 +847,34 @@ class MultiGroupHelpFormatter(HelpFormatter):
         # actions in groups, with possible repetitions
         # positionals that not in a group
         # It orders groups with positionals to preserved the parsing order
-
+        actions = actions[:] # work with copy, not original
         groups = self._group_sort(actions, groups)
-        group_actions = set()
+        seen_actions = set()
         arg_parts = []
         for group in groups:
-            gactions = group._group_actions
-            if set(gactions).issubset(set(actions)):
-                # format group if all its actions are in actions
-                # in contrast with the default formatter, order does not matter
-                group_actions.update(gactions)
-                group_parts = self._format_group_usage(group)
-                # expect 1 element, or 0 if all suppressed
-                # or more elements if group cannot be formatted - get actions instead
-                arg_parts += group_parts
+            #gactions = group._group_actions
+            if True:
+                group_parts, gactions = self._format_group_usage(group)
+                seen_actions.update(gactions)
+                arg_parts.extend(group_parts)
 
         # now format all remaining actions
-        for act in group_actions:
-            actions.remove(act)
+        for act in seen_actions:
+            try:
+                actions.remove(act)
+            except ValueError:
+                pass
         # find optionals and positionals in the remaining actions list
         # i.e. ones that are not in any group
         optionals = [action for action in actions if action.option_strings]
         positionals = [action for action in actions if not action.option_strings]
 
-        parts = self._format_just_actions_usage(optionals)
-        arg_parts = parts + arg_parts
+        opt_parts = self._format_just_actions_usage(optionals)
+        #arg_parts = parts + arg_parts
 
         pos_parts = self._format_just_actions_usage(positionals)
         # keep pos_parts separate, so they can be handled separately in long lines
-        return (arg_parts, pos_parts)
+        return (opt_parts, arg_parts, pos_parts)
 
     def _group_sort(self, actions, groups):
         # sort groups by order of positionals, if any
@@ -902,6 +906,44 @@ class MultiGroupHelpFormatter(HelpFormatter):
         sortGroups = [i[0] for i in sortGroups]
         return sortGroups
 
+    # need to sort out the []() for nested groups
+    # when do these just mark groups, what does it mean to be be 'required' when nested
+    # need to collect actions when nesting
+
+    def _format_group_usage(self, group):
+        # format one group
+        joiner = getattr(group, 'joiner', ' | ')
+        seen_actions = set()
+        actions = group._group_actions
+        parts = []
+
+        parts += '(' if group.required else '['
+        for action in actions:
+            if isinstance(action, _NestingGroup):
+                part, gactions = self._format_group_usage(action)
+                seen_actions.update(gactions)
+                part = part[0]
+            else:
+                part = self._format_just_actions_usage([action])
+                part = _re.sub(r'^\[(.*)\]$', r'\1', part[0]) # remove 'optional'[]
+                seen_actions.add(action)
+            if part:
+                parts.append(part)
+                parts.append(joiner)
+        if len(parts)>1:
+            parts[-1] = ')' if group.required else ']'
+        else:
+            # nothing added
+            parts = []
+        arg_parts = [''.join(parts)]
+
+        def cleanup(text):
+            # remove unnecessary ()
+            pat = r'^\(([^(%s)]*)\)$'%joiner # is this robust enough?
+            text = _re.sub(pat, r'\1', text)
+            return text
+        arg_parts = [cleanup(t) for t in arg_parts]
+        return arg_parts, seen_actions
 
 # =====================
 # Options and Arguments
@@ -1812,7 +1854,11 @@ class _ActionsContainer(object):
 
     def add_nested_group(self, *args, **kwargs):
         group = _NestingGroup(self, *args, **kwargs)
-        self._action_groups.append(group)
+        #self._action_groups.append(group)
+        if group.fn is None:
+            # or test is self is not _NestingGroup
+            # should a nestingGroup have such a list?
+            self._mutually_exclusive_groups.append(group)
         return group
 
     def _add_action(self, action):
@@ -1840,6 +1886,7 @@ class _ActionsContainer(object):
         self._actions.remove(action)
 
     def _add_container_actions(self, container):
+        # use to load data from parents
         # collect groups by titles
         title_group_map = {}
         for group in self._action_groups:
@@ -2130,7 +2177,7 @@ class _NestingGroup(_ArgumentGroup):
         dest = kwargs.pop('dest', '')
         required = kwargs.pop('required', False)
         super(_NestingGroup, self).__init__(container, **kwargs)
-        self.container = container
+        self.container = container  # _container to be consistent with MXG
         self.dest = dest
         self.required = required
         if isinstance(container, ArgumentParser):
@@ -2142,17 +2189,30 @@ class _NestingGroup(_ArgumentGroup):
         # print(name,self.dest, self.kind)
         if self.kind in ['mxg']:
             fn = self.test_mx_group # mutually exclusive
+            joiner = ' | ' # something better for xor?
         elif self.kind in ['inc']:
             fn = self.test_inc_group # inclusive
+            joiner = ' & '
         elif self.kind in ['any']:
             fn = self.test_any_group # any
+            joiner =' | '
         else:
             fn = self.test_this_group
+            joiner = ' , '
+        self.joiner = joiner
         if isinstance(self.container, _NestingGroup):
             # save fn on self
             self.fn = fn
         else: # register fn with common register (container)
+            self.fn = None
             self.container.register('cross_tests', name, fn)
+        # attributes to help format this group
+        # make it look like an action
+        self.help = 'nested group help'
+        self.option_strings = ''
+
+    def _format_args(self, *args):
+        return ''
 
     def _add_action(self, action):
         if self.kind in ['mxg'] and action.required:
