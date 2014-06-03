@@ -745,6 +745,164 @@ class CompactHelpFormatter(HelpFormatter):
                 parts.append('%s %s' % (option_string, args_string))
             return ', '.join(parts)
 
+# from multigroup, issue 10984
+class MultiGroupHelpFormatter(HelpFormatter):
+    """Help message formatter that handles overlapping mutually exclusive
+    groups.
+
+    Only the name of this class is considered a public API. All the methods
+    provided by the class are considered an implementation detail.
+
+    This formats all the groups, even if they share actions, or the actions
+    do not occur in the other in which they were defined (in parse._actions)
+    Thus an action may appear in more than one group
+    Groups are presented in an order that preserves the order of positionals
+    """
+
+    def _format_usage(self, usage, actions, groups, prefix):
+        #
+        if prefix is None:
+            prefix = _('usage: ')
+
+        # if usage is specified, use that
+        if usage is not None:
+            usage = usage % dict(prog=self._prog)
+
+        # if no optionals or positionals are available, usage is just prog
+        elif usage is None and not actions:
+            usage = '%(prog)s' % dict(prog=self._prog)
+
+        # if optionals and positionals are available, calculate usage
+        elif usage is None:
+            prog = '%(prog)s' % dict(prog=self._prog)
+            optionals = [action for action in actions if action.option_strings]
+            positionals = [action for action in actions if not action.option_strings]
+
+            # build full usage string
+            format = self._format_actions_usage
+            (opt_parts, pos_parts) = format(optionals + positionals, groups)
+            usage = ' '.join([s for s in [prog]+opt_parts+pos_parts if s])
+
+            # the rest is the same as in the parent formatter
+            # wrap the usage parts if it's too long
+            text_width = self._width - self._current_indent
+            if len(prefix) + len(usage) > text_width:
+                # helper for wrapping lines
+                def get_lines(parts, indent, prefix=None):
+                    lines = []
+                    line = []
+                    if prefix is not None:
+                        line_len = len(prefix) - 1
+                    else:
+                        line_len = len(indent) - 1
+                    for part in parts:
+                        if line and line_len + 1 + len(part) > text_width:
+                            lines.append(indent + ' '.join(line))
+                            line = []
+                            line_len = len(indent) - 1
+                        line.append(part)
+                        line_len += len(part) + 1
+                    if line:
+                        lines.append(indent + ' '.join(line))
+                    if prefix is not None:
+                        lines[0] = lines[0][len(indent):]
+                    return lines
+
+                # if prog is short, follow it with optionals or positionals
+                if len(prefix) + len(prog) <= 0.75 * text_width:
+                    indent = ' ' * (len(prefix) + len(prog) + 1)
+                    if opt_parts:
+                        lines = get_lines([prog] + opt_parts, indent, prefix)
+                        lines.extend(get_lines(pos_parts, indent))
+                    elif pos_parts:
+                        lines = get_lines([prog] + pos_parts, indent, prefix)
+                    else:
+                        lines = [prog]
+
+                # if prog is long, put it on its own line
+                else:
+                    indent = ' ' * len(prefix)
+                    parts = opt_parts + pos_parts
+                    lines = get_lines(parts, indent)
+                    if len(lines) > 1:
+                        lines = []
+                        lines.extend(get_lines(opt_parts, indent))
+                        lines.extend(get_lines(pos_parts, indent))
+                    lines = [prog] + lines
+
+                # join lines into usage
+                usage = '\n'.join(lines)
+
+        # prefix with 'usage:'
+        return '%s%s\n\n' % (prefix, usage)
+
+    def _format_actions_usage(self, actions, groups):
+        # usage will list
+        # optionals that are not in a group
+        # actions in groups, with possible repetitions
+        # positionals that not in a group
+        # It orders groups with positionals to preserved the parsing order
+
+        groups = self._group_sort(actions, groups)
+        group_actions = set()
+        arg_parts = []
+        for group in groups:
+            gactions = group._group_actions
+            if set(gactions).issubset(set(actions)):
+                # format group if all its actions are in actions
+                # in contrast with the default formatter, order does not matter
+                group_actions.update(gactions)
+                group_parts = self._format_group_usage(group)
+                # expect 1 element, or 0 if all suppressed
+                # or more elements if group cannot be formatted - get actions instead
+                arg_parts += group_parts
+
+        # now format all remaining actions
+        for act in group_actions:
+            actions.remove(act)
+        # find optionals and positionals in the remaining actions list
+        # i.e. ones that are not in any group
+        optionals = [action for action in actions if action.option_strings]
+        positionals = [action for action in actions if not action.option_strings]
+
+        parts = self._format_just_actions_usage(optionals)
+        arg_parts = parts + arg_parts
+
+        pos_parts = self._format_just_actions_usage(positionals)
+        # keep pos_parts separate, so they can be handled separately in long lines
+        return (arg_parts, pos_parts)
+
+    def _group_sort(self, actions, groups):
+        # sort groups by order of positionals, if any
+        from operator import itemgetter
+        if len(groups)==0:
+            return groups
+        optionals = [action for action in actions if action.option_strings]
+        positionals = [action for action in actions if not action.option_strings]
+
+        # create a sort key, based on position of action in actions
+        posdex = [-1]*len(groups)
+        noInGroups = set(positionals)
+        for i,group in enumerate(groups):
+            for action in group._group_actions:
+                if action in positionals:
+                    posdex[i] = positionals.index(action)
+                    noInGroups.discard(action)
+        sortGroups = groups[:]
+        # actions not found in any group are put in their own tempory groups
+        samplegroup = group
+        for action in noInGroups:
+            g = _copy.copy(samplegroup)
+            g.required = action.required
+            g._group_actions = [action]
+            sortGroups.append(g)
+            posdex.append(positionals.index(action))
+
+        sortGroups = sorted(zip(sortGroups,posdex), key=itemgetter(1))
+        sortGroups = [i[0] for i in sortGroups]
+        return sortGroups
+
+
 # =====================
 # Options and Arguments
 # =====================
@@ -1631,7 +1789,30 @@ class _ActionsContainer(object):
         kwargs.pop('title', None)
         kwargs.pop('description', None)
         group = _MutuallyExclusiveGroup(container, **kwargs)
+        #if hasattr(container, 'parser'):
+        #    container.parser._mutually_exclusive_groups.append(group)
         container._mutually_exclusive_groups.append(group)
+
+        return group
+
+    def add_mutually_exclusive_group(self, **kwargs):
+        # test replacing MXG with Nesting
+        # all test_argparse works with this replacement
+        if 'title' in kwargs:
+            args = kwargs.copy()
+            args.pop('required', None)
+            container = self.add_argument_group(**args)
+        else:
+            container = self
+        kwargs.pop('title', None)
+        kwargs.pop('description', None)
+        group = _NestingGroup(container, kind='mxg', **kwargs)
+        container._mutually_exclusive_groups.append(group)
+        return group
+
+    def add_nested_group(self, *args, **kwargs):
+        group = _NestingGroup(self, *args, **kwargs)
+        self._action_groups.append(group)
         return group
 
     def _add_action(self, action):
@@ -1839,6 +2020,22 @@ class _ArgumentGroup(_ActionsContainer):
         super(_ArgumentGroup, self)._remove_action(action)
         self._group_actions.remove(action)
 
+    """
+    as a container a group has _action_groups and _mutually_exclusive_groups
+    why should container share m_e_g?
+    add_m_e_g appends the group to the shared list
+        that way the parser sees the m_e_g
+        the group (if different) doesnt need to know about it
+    _add_container_actions is only used to add a parent
+        that's a complex bit of code
+
+    remove_action used test_argparse.TestConflictHandling
+
+    an m_e_g records its container, an a_g does not
+
+    a parser makes use of its _mutually_exclusive_groups (for setting up test and usage)
+    but a group has no use for it
+    """
 
 class _MutuallyExclusiveGroup(_ArgumentGroup):
 
@@ -1846,6 +2043,15 @@ class _MutuallyExclusiveGroup(_ArgumentGroup):
         super(_MutuallyExclusiveGroup, self).__init__(container)
         self.required = required
         self._container = container
+        # register the test for this type of group
+        # self.register works since parser and groups share _registers
+        if self._registry_get('cross_tests','mxg', None) is None:
+            # this test isn't essential, but in more general case we shouldn't
+            # register the same test multiple times
+            mytest = _MutuallyExclusiveGroup.test_mut_ex_groups
+            self.register('cross_tests', 'mxg', mytest)
+        name = str(id(self)) # a unique key for this test
+        self.register('cross_tests', name, self.test_this_group)
 
     def _add_action(self, action):
         if action.required:
@@ -1859,6 +2065,208 @@ class _MutuallyExclusiveGroup(_ArgumentGroup):
         self._container._remove_action(action)
         self._group_actions.remove(action)
 
+    def add_argument(self, *args, **kwargs):
+        # add extension that allows adding a prexisting Action
+        # alt for issue10984 multigroup
+        if len(args) and isinstance(args[0], Action):
+            # add the action to self, but not to the parser (already there)
+            action =  args[0]
+            return self._group_actions.append(action)
+        else:
+            return super(_MutuallyExclusiveGroup, self).add_argument(*args, **kwargs)
+
+    @staticmethod
+    def test_mut_ex_groups(parser, seen_non_default_actions, *vargs, **kwargs):
+        # alternative mutually_exclusive_groups test
+        # performed once at end of parse_args rather than with each entry
+        # the arguments listed in the error message may differ
+        # this gives a small speed improvement
+        # more importantly it is easier to customize and expand
+        # from argdev/inclusive
+
+        seen_actions = set(seen_non_default_actions)
+
+        for group in parser._mutually_exclusive_groups:
+            group_actions = group._group_actions
+            group_seen = seen_actions.intersection(group_actions)
+            cnt = len(group_seen)
+            if cnt > 1:
+                msg = 'only one the arguments %s is allowed'
+            elif cnt == 0 and group.required:
+                msg = 'one of the arguments %s is required'
+            else:
+                msg = None
+            if msg:
+                names = [_get_action_name(action)
+                            for action in group_actions
+                            if action.help is not SUPPRESS]
+                parser.error(msg % ' '.join(names))
+        print('testing mxg groups')
+
+    def test_this_group(self, parser, seen_non_default_actions, *vargs, **kwargs):
+        # test to be run near end of parsing
+        seen_actions = set(seen_non_default_actions)
+
+        group_actions = self._group_actions
+        group_seen = seen_actions.intersection(group_actions)
+        cnt = len(group_seen)
+        if cnt > 1:
+            msg = 'only one the arguments %s is allowed'
+        elif cnt == 0 and self.required:
+            msg = 'one of the arguments %s is required'
+        else:
+            msg = None
+        if msg:
+            names = [_get_action_name(action)
+                        for action in group_actions
+                        if action.help is not SUPPRESS]
+            parser.error(msg % ' '.join(names))
+        print('mxg testing',[a.dest for a in group_actions])
+
+class _NestingGroup(_ArgumentGroup):
+
+    def __init__(self, container, **kwargs):
+        kind = kwargs.pop('kind', None)
+        dest = kwargs.pop('dest', '')
+        required = kwargs.pop('required', False)
+        super(_NestingGroup, self).__init__(container, **kwargs)
+        self.container = container
+        self.dest = dest
+        self.required = required
+        if isinstance(container, ArgumentParser):
+            self.parser = container
+        else:
+            self.parser = getattr(container, 'parser', container)
+        self.kind = kind
+        name = str(id(self)) # a unique key for this test
+        # print(name,self.dest, self.kind)
+        if self.kind in ['mxg']:
+            fn = self.test_mx_group # mutually exclusive
+        elif self.kind in ['inc']:
+            fn = self.test_inc_group # inclusive
+        elif self.kind in ['any']:
+            fn = self.test_any_group # any
+        else:
+            fn = self.test_this_group
+        if isinstance(self.container, _NestingGroup):
+            # save fn on self
+            self.fn = fn
+        else: # register fn with common register (container)
+            self.container.register('cross_tests', name, fn)
+
+    def _add_action(self, action):
+        if self.kind in ['mxg'] and action.required:
+            msg = _('mutually exclusive arguments must be optional')
+            raise ValueError(msg)
+        # add action to parser, but not container
+        action = self.parser._add_action(action)
+        self._group_actions.append(action)
+        return action
+
+    def add_nested_group(self, *args, **kwargs):
+        # if this is nested group, add the new group to its own _group_actions
+        group = super(_NestingGroup, self).add_nested_group(*args, **kwargs)
+        self._group_actions.append(group)
+        return group
+
+    def add_argument(self, *args, **kwargs):
+        # add extension that allows adding a prexisting Action
+        if len(args) and isinstance(args[0], Action):
+            # add the action to self, but not to the parser (already there)
+            action =  args[0]
+            return self._group_actions.append(action)
+        else:
+            return super(_NestingGroup, self).add_argument(*args, **kwargs)
+
+    def test_this_group(self, parser, seen_non_default_actions, *vargs, **kwargs):
+        # test to be run near end of parsing
+        seen_actions = set(seen_non_default_actions)
+
+        group_actions = self._group_actions
+        group_seen = seen_actions.intersection(group_actions)
+        cnt = len(group_seen)
+        print('nested testing',[a.dest for a in group_actions])
+
+    def count_actions(self, parser, seen_actions, *vargs, **kwargs):
+        # utility that is useful in most kinds of tests
+        # count the number of actions that were seen
+        # handles nested groups
+        seen_actions = set(seen_actions)
+        group_actions = self._group_actions
+        actions = [a for a in group_actions if isinstance(a, Action)]
+        groups = [a for a in group_actions if isinstance(a, _NestingGroup)]
+        okgroups = [a for a in groups if a.fn(parser, seen_actions, *vargs, **kwargs)]
+        okgroups = set(okgroups)
+        # print('ok group', [g.dest for g in okgroups])
+        # if a group tests as ok (no error) it counts as 'seen'
+        group_seen = seen_actions.intersection(actions)
+        group_seen = group_seen.union(okgroups)
+        cnt = len(group_seen)
+        return cnt
+
+    def test_mx_group(self, parser, seen_non_default_actions, *vargs, **kwargs):
+        # test equivalent the mutually_exclusive_groups
+        seen_actions = set(seen_non_default_actions)
+
+        group_actions = self._group_actions
+        cnt = self.count_actions(parser, seen_non_default_actions, *vargs, **kwargs)
+        if cnt > 1:
+            msg = '%s: only one the arguments [%s] is allowed'
+        elif cnt == 0 and self.required:
+            msg = '%s: one of the arguments [%s] is required'
+        else:
+            msg = None
+        if msg:
+            names = ' '.join([action.dest for action in group_actions])
+            parser.error(msg % (self.dest, names))
+        return cnt>0 # True if something present, False if none
+
+    def test_inc_group(self, parser, seen_non_default_actions, *vargs, **kwargs):
+        # inclusive group - if one is present, all must be present
+        # if group is required, all are required
+        group_actions = self._group_actions
+        cnt = self.count_actions(parser, seen_non_default_actions, *vargs, **kwargs)
+        if cnt > 0: # if any
+            if cnt < len(group_actions): # all
+                msg = '%s: all of the arguments [%s] are required'
+            else:
+                msg = None
+        elif cnt == 0 and self.required:
+            msg = '%s: all of the arguments [%s] is required'
+        else:
+            msg = None
+        if msg:
+            names = ' '.join([action.dest for action in group_actions])
+            parser.error(msg % (self.dest, names))
+        print('inc testing',[a.dest for a in group_actions])
+        return cnt>0
+
+    def test_any_group(self, parser, seen_non_default_actions, *vargs, **kwargs):
+        # any may be present (or atleast one if group is required)
+        group_actions = self._group_actions
+        cnt = self.count_actions(parser, seen_non_default_actions, *vargs, **kwargs)
+        if cnt == 0 and self.required:
+            msg = 'some of the arguments %s is required'
+        else:
+            msg = None
+        if msg:
+            names = [action.dest for action in group_actions]
+            parser.error(msg % ' '.join(names))
+        print('any testing',[a.dest for a in group_actions])
+        return cnt>0
+
+    # group_actions can include actions and other _NestingGroups
+    # 'kind' denotes some sort of test, e.g. like mut-exclusive
+    #    mut-exclusive - like m-e-g but allows for 'presense' of ngroup
+    #       ie at most one of actions or groups allowed
+    #       x req = only one allowed
+    #    mut-inclusive - all present
+    #    mut-any - cnt >=0, or >0 if required
+    #    mut-null - no test
+
+    # add some sort of usage formatting; symbol atleast (| for mxg; & for inc)
+    # diff between true or, and xor; maybe symbol is a string
+    # group does not have attribute 'get_name', nor 'help'
 
 class ArgumentParser(_AttributeHolder, _ActionsContainer):
     """Object for parsing command line strings into Python objects.
@@ -2050,6 +2458,16 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # parse the arguments and exit if there are any errors
         try:
             namespace, args = self._parse_known_args(args, namespace)
+
+            # evaluate any _DelayedValues left in the namespace
+            # was in _parse_known_args
+            for action in self._actions:
+                value = getattr(namespace, action.dest, None)
+                if isinstance(value, _DelayedValue):
+                    assert value.func.__name__=='_get_value'
+                    setattr(namespace, action.dest, value())
+
+
             if hasattr(namespace, _UNRECOGNIZED_ARGS_ATTR):
                 args.extend(getattr(namespace, _UNRECOGNIZED_ARGS_ATTR))
                 delattr(namespace, _UNRECOGNIZED_ARGS_ATTR)
@@ -2063,6 +2481,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         if self.fromfile_prefix_chars is not None:
             arg_strings = self._read_args_from_files(arg_strings)
 
+        """
         # map all mutually exclusive arguments to the other arguments
         # they can't occur with
         action_conflicts = {}
@@ -2072,6 +2491,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 conflicts = action_conflicts.setdefault(mutex_action, [])
                 conflicts.extend(group_actions[:i])
                 conflicts.extend(group_actions[i + 1:])
+        """
 
         # find all option indices, and determine the arg_string_pattern
         # which has an 'O' if there is an option at an index,
@@ -2117,11 +2537,13 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
             if not using_default:
                 seen_non_default_actions.append(action) #add(action)
+                """
                 for conflict_action in action_conflicts.get(action, []):
                     if conflict_action in seen_non_default_actions:
                         msg = _('not allowed with argument %s')
                         action_name = conflict_action.get_name()
                         raise ArgumentError(action, msg % action_name)
+                """
 
             # take the action if we didn't receive a SUPPRESS value
             # (e.g. from a default)
@@ -2332,13 +2754,13 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         extras = consume_loop(False, ii)
         _cnt += 1
 
-        # make sure all required actions were present and also convert
-        # action defaults which were not given as arguments
+        # make sure all required actions were present
         required_actions = []
         for action in self._actions:
             if action not in seen_non_default_actions: # seen_actions:
                 if action.required:
                     required_actions.append(action.get_name())
+                """
                 else:
                     # evaluate the value in the namespace if it is a
                     # wrapped _get_value function
@@ -2346,12 +2768,14 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                     if isinstance(value, _DelayedValue):
                         assert value.func.__name__=='_get_value'
                         setattr(namespace, action.dest, value())
+                """
 
         if required_actions:
             required_actions = ['%s'%name for name in required_actions]
             self.error(_('the following arguments are required: %s') %
                        ', '.join(required_actions))
 
+        """
         # make sure all required groups had one option present
         for group in self._mutually_exclusive_groups:
             if group.required:
@@ -2367,12 +2791,12 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                     names = ['%s'%name for name in names]
                     msg = _('one of the arguments %s is required')
                     self.error(msg % ' '.join(names))
-
+        """
         # give user a hook to run more general tests on arguments
         # its primary purpose is to give the user access to seen_non_default_actions
         # I can't think of a case where seen_actions is better - so omit
-        for testfn in self._get_cross_tests():
-            testfn(self, seen_non_default_actions, seen_actions, namespace, extras)
+        for testkey, testfn in self._get_cross_tests():
+            testfn(self, seen_non_default_actions, seen_actions, namespace, extras, key=testkey)
 
         # return the updated namespace and the extra arguments
         return namespace, extras
@@ -2594,7 +3018,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # allowing me to define the group tests in the group class itself
         # This use of _registries is slight non_standard since I am
         # ignoring the 2nd level keys
-        tests = self._registries['cross_tests'].values()
+        tests = self._registries['cross_tests'].items() # values()
         return tests
 
     def crosstest(self, func):
