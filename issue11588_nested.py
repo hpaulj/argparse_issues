@@ -6,7 +6,11 @@ g1 = parser.add_nested_group(dest='FILE or DIR', kind='mxg', required=True)
 a_file= g1.add_argument("-o", "--outfile", metavar='FILE')
 g2 = g1.add_nested_group(dest='DIR and PS', kind='inc')
 a_dir = g2.add_argument("-O", "--outdir", metavar='DIR')
-g3 = g2.add_nested_group(dest='P or S', kind='mxg')
+g3 = g2.add_nested_group(dest='P or S',
+    kind='mxg',
+    parens='()',
+    # joiner=' || ',
+    )
 a_pat = g3.add_argument("-p", "--outpattern", metavar='PATTERN')
 a_suf = g3.add_argument("-s", "--outsuffix", metavar='SUFFIX')
 

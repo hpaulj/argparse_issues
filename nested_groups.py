@@ -38,9 +38,11 @@ parser = argparse.ArgumentParser(prog="Nesting", formatter_class=argparse.MultiG
 g1 = parser.add_nested_group(title='group1', kind='mxg', dest='nest1')
 g1x1 = g1.add_argument('--f1')
 g1x2 = g1.add_argument('foo', nargs='?')
+"""
 g11 = parser.add_nested_group(title='group11', dest='nest2') # another at 1st level
 g11.add_argument('-a')
 g11.add_argument('-b')
+"""
 g2 = g1.add_nested_group(title='group2', kind='inc', dest='inc2')
 g2x1 = g2.add_argument('--f2')
 g2x2 = g2.add_argument('--g2')
@@ -64,3 +66,6 @@ if g2.kind=='any':
 # move the DelayedValue call to end of parse_known_args (out of _p_k_a)
 
 # make nest groups usage formatting work
+
+# groups should specify parens as well as joiner
+

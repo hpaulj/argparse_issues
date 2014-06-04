@@ -913,11 +913,13 @@ class MultiGroupHelpFormatter(HelpFormatter):
     def _format_group_usage(self, group):
         # format one group
         joiner = getattr(group, 'joiner', ' | ')
+        parens = '()' if group.required else '[]'
+        parens = getattr(group, 'parens', parens) # let group define its own brackets
         seen_actions = set()
         actions = group._group_actions
         parts = []
 
-        parts += '(' if group.required else '['
+        parts += parens[0]
         for action in actions:
             if isinstance(action, _NestingGroup):
                 part, gactions = self._format_group_usage(action)
@@ -931,7 +933,7 @@ class MultiGroupHelpFormatter(HelpFormatter):
                 parts.append(part)
                 parts.append(joiner)
         if len(parts)>1:
-            parts[-1] = ')' if group.required else ']'
+            parts[-1] = parens[1]
         else:
             # nothing added
             parts = []
@@ -942,7 +944,9 @@ class MultiGroupHelpFormatter(HelpFormatter):
             pat = r'^\(([^(%s)]*)\)$'%joiner # is this robust enough?
             text = _re.sub(pat, r'\1', text)
             return text
-        arg_parts = [cleanup(t) for t in arg_parts]
+        # this cleanup applies if group is empty or has single item
+        # lets skip this for now
+        # arg_parts = [cleanup(t) for t in arg_parts]
         return arg_parts, seen_actions
 
 # =====================
@@ -2176,10 +2180,14 @@ class _NestingGroup(_ArgumentGroup):
         kind = kwargs.pop('kind', None)
         dest = kwargs.pop('dest', '')
         required = kwargs.pop('required', False)
+        parens = kwargs.pop('parens', None)
+        joiner = kwargs.pop('joiner', None)
         super(_NestingGroup, self).__init__(container, **kwargs)
         self.container = container  # _container to be consistent with MXG
         self.dest = dest
         self.required = required
+        self.parens = parens
+        self.joiner = joiner
         if isinstance(container, ArgumentParser):
             self.parser = container
         else:
@@ -2187,19 +2195,25 @@ class _NestingGroup(_ArgumentGroup):
         self.kind = kind
         name = str(id(self)) # a unique key for this test
         # print(name,self.dest, self.kind)
-        if self.kind in ['mxg']:
+        # subclass this?
+        if self.kind in ['mxg','ecl','excl','exclusive','xor']:
             fn = self.test_mx_group # mutually exclusive
             joiner = ' | ' # something better for xor?
-        elif self.kind in ['inc']:
+            parens = '()' if self.required else '[]'
+        elif self.kind in ['inc','inclusive']:
             fn = self.test_inc_group # inclusive
             joiner = ' & '
+            parens = '()'
         elif self.kind in ['any']:
             fn = self.test_any_group # any
             joiner =' | '
+            parens = '{}'
         else:
             fn = self.test_this_group
             joiner = ' , '
-        self.joiner = joiner
+            parens = '()'
+        if self.joiner is None: self.joiner = joiner
+        if self.parens is None: self.parens = parens
         if isinstance(self.container, _NestingGroup):
             # save fn on self
             self.fn = fn
