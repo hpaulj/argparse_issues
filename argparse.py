@@ -76,6 +76,7 @@ __all__ = [
     'MultiGroupHelpFormatter',
     'Namespace',
     'Action',
+    'UsageGroup',
     'ONE_OR_MORE',
     'OPTIONAL',
     'PARSER',
@@ -927,7 +928,7 @@ class MultiGroupHelpFormatter(HelpFormatter):
 
         parts += parens[0]
         for action in actions:
-            if isinstance(action, _NestingGroup):
+            if isinstance(action, UsageGroup):
                 part, gactions = self._format_group_usage(action)
                 seen_actions.update(gactions)
                 part = part[0]
@@ -1858,20 +1859,20 @@ class _ActionsContainer(object):
             container = self
         kwargs.pop('title', None)
         kwargs.pop('description', None)
-        group = _NestingGroup(container, kind='mxg', **kwargs)
+        group = UsageGroup(container, kind='mxg', **kwargs)
         container._mutually_exclusive_groups.append(group)
         return group
 
     def add_mutually_exclusive_group(self, **kwargs):
         kwargs.update(kind='mxg')
-        return self.add_nested_group(**kwargs)
+        return self.add_usage_group(**kwargs)
 
-    def add_nested_group(self, *args, **kwargs):
-        group = _NestingGroup(self, *args, **kwargs)
+    def add_usage_group(self, *args, **kwargs):
+        group = UsageGroup(self, *args, **kwargs)
         self._mutually_exclusive_groups.append(group)
         return group
 
-    def add_nested_group(self, **kwargs):
+    def add_usage_group(self, **kwargs):
         # test replacing MXG with Nesting
         # all test_argparse works with this replacement
         # it's messy to have to list all these AG kwargs
@@ -1879,7 +1880,7 @@ class _ActionsContainer(object):
             args = kwargs.copy()
             for k in kwargs.keys():
                 # simpler to specify what argument_group accepts than
-                # what nested_group might provide
+                # what usage_group might provide
                 if k not in ['title', 'description',
                              'prefix_chars',
                              'argument_default',
@@ -1890,7 +1891,7 @@ class _ActionsContainer(object):
             container = self
         kwargs.pop('title', None)
         kwargs.pop('description', None)
-        group = _NestingGroup(container, **kwargs)
+        group = UsageGroup(container, **kwargs)
         container._mutually_exclusive_groups.append(group)
         return group
 
@@ -2203,7 +2204,7 @@ class _MutuallyExclusiveGroup(_ArgumentGroup):
             parser.error(msg % ' '.join(names))
         print('mxg testing',[a.dest for a in group_actions])
 
-class _NestingGroup(_ArgumentGroup):
+class UsageGroup(_ArgumentGroup):
 
     def __init__(self, container, **kwargs):
         kind = kwargs.pop('kind', None)
@@ -2214,7 +2215,7 @@ class _NestingGroup(_ArgumentGroup):
         testfn = kwargs.pop('testfn', None)
         usage = kwargs.pop('usage', None)
         # or use a canned fn to produce only kwargs that AG recognizes
-        super(_NestingGroup, self).__init__(container, **kwargs)
+        super(UsageGroup, self).__init__(container, **kwargs)
         self.container = container  # _container to be consistent with MXG
         self.dest = dest
         self.required = required
@@ -2249,7 +2250,7 @@ class _NestingGroup(_ArgumentGroup):
         if self.joiner is None: self.joiner = joiner
         if self.parens is None: self.parens = parens
         if self.testfn is None: self.testfn = testfn
-        if isinstance(self.container, _NestingGroup):
+        if isinstance(self.container, UsageGroup):
             pass
         else:
             # register testfn with common register (container)
@@ -2272,15 +2273,15 @@ class _NestingGroup(_ArgumentGroup):
         self._group_actions.append(action)
         return action
 
-    def add_nested_group(self, *args, **kwargs):
-        if len(args) and isinstance(args[0], _NestingGroup):
+    def add_usage_group(self, *args, **kwargs):
+        if len(args) and isinstance(args[0], UsageGroup):
             group = args[0]
             self._group_actions.append(group)
             return group
         # add to own list, not the parsers
         kwargs.pop('title', None) # ignore at this level
         # or give warning about ignored title?
-        group = _NestingGroup(self, *args, **kwargs)
+        group = UsageGroup(self, *args, **kwargs)
         self._group_actions.append(group)
         return group
 
@@ -2292,7 +2293,7 @@ class _NestingGroup(_ArgumentGroup):
             self._group_actions.append(action)
             return action
         else:
-            return super(_NestingGroup, self).add_argument(*args, **kwargs)
+            return super(UsageGroup, self).add_argument(*args, **kwargs)
 
     def test_this_group(self, parser, seen_non_default_actions, *vargs, **kwargs):
         # test to be run near end of parsing
@@ -2310,7 +2311,7 @@ class _NestingGroup(_ArgumentGroup):
         seen_actions = set(seen_actions)
         group_actions = self._group_actions
         actions = [a for a in group_actions if isinstance(a, Action)]
-        groups = [a for a in group_actions if isinstance(a, _NestingGroup)]
+        groups = [a for a in group_actions if isinstance(a, UsageGroup)]
         okgroups = [a for a in groups if a.testfn(parser, seen_actions, *vargs, **kwargs)]
         okgroups = set(okgroups)
         # print('ok group', [g.dest for g in okgroups])
@@ -2371,7 +2372,7 @@ class _NestingGroup(_ArgumentGroup):
         print('any testing',[a.dest for a in group_actions])
         return cnt>0
 
-    # group_actions can include actions and other _NestingGroups
+    # group_actions can include actions and other UsageGroups
     # 'kind' denotes some sort of test, e.g. like mut-exclusive
     #    mut-exclusive - like m-e-g but allows for 'presense' of ngroup
     #       ie at most one of actions or groups allowed

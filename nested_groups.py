@@ -20,11 +20,11 @@ print('')
 
 print('nesting behaving like mxg')
 parser = argparse.ArgumentParser(prog="NG", formatter_class=argparse.MultiGroupHelpFormatter)
-g1x1 = parser.add_nested_group(kind='inc')
+g1x1 = parser.add_usage_group(kind='inc')
 f1Action = g1x1.add_argument('--f1')
 g1x1.add_argument('--g1')
 
-g2x1 = parser.add_nested_group(kind='mxg', required=True)
+g2x1 = parser.add_usage_group(kind='mxg', required=True)
 f2Action = g2x1.add_argument('--f2')
 g2x1.add_argument('--g2')
 #g1x1.add_argument(f2Action)
@@ -35,18 +35,18 @@ print('')
 
 expected_usage = """EXPECT [-h]  [group11] [--f1 F1 | foo | [--f2 F2 & --g2 G2] | [--f3 F3 | --g3 G3]]"""
 parser = argparse.ArgumentParser(prog="Nesting", formatter_class=argparse.MultiGroupHelpFormatter)
-g1 = parser.add_nested_group(kind='mxg', dest='nest1')
+g1 = parser.add_usage_group(kind='mxg', dest='nest1')
 g1x1 = g1.add_argument('--f1')
 g1x2 = g1.add_argument('foo', nargs='?')
 """
-g11 = parser.add_nested_group(dest='nest2') # another at 1st level
+g11 = parser.add_usage_group(dest='nest2') # another at 1st level
 g11.add_argument('-a')
 g11.add_argument('-b')
 """
-g2 = g1.add_nested_group(kind='inc', dest='inc2')
+g2 = g1.add_usage_group(kind='inc', dest='inc2')
 g2x1 = g2.add_argument('--f2')
 g2x2 = g2.add_argument('--g2')
-g3 = g1.add_nested_group(kind='mxg', dest='mxg3',title='test')
+g3 = g1.add_usage_group(kind='mxg', dest='mxg3',title='test')
 g3x1 = g3.add_argument('--f3')
 g3x2 = g3.add_argument('--g3')
 #g3x2 = g3.add_argument(g2x2) # works but produces conflict

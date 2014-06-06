@@ -8,15 +8,15 @@ parser = argparse.ArgumentParser(
 
 parser.add_argument('-v', '--verbose', help='verbose', action='store_true', default=False)
 
-root_group = parser.add_nested_group(kind='mxg')
+root_group = parser.add_usage_group(kind='mxg')
 
-group_list = root_group.add_nested_group(kind='mxg')
+group_list = root_group.add_usage_group(kind='mxg')
 #group_list = root_group.add_argument_group('list')
 group_list.add_argument('-m', help='list only modules', action='store_const', dest='list', const='modules', default='all')
 group_list.add_argument('-p', help='list only ports', action='store_const', dest='list', const='ports', default='all')
 group_list.add_argument('--list', help='list only module or ports', choices=['modules','ports'], metavar='<modules/ports>', default='all')
 
-group_simulate = root_group.add_nested_group(kind='mxg')
+group_simulate = root_group.add_usage_group(kind='mxg')
 #group_simulate = root_group.add_argument_group('simulate')
 group_simulate.add_argument('-M', help='simulate module down', nargs=1, metavar='module_name', dest='simulate')
 group_simulate.add_argument('-P', help='simulate FC port down', nargs=1, metavar='fc_port_name', dest='simulate')

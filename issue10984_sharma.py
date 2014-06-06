@@ -19,9 +19,9 @@ except SystemExit:
 
 
 parser = argparse.ArgumentParser(formatter_class=argparse.MultiGroupHelpFormatter)
-g1 = parser.add_nested_group(kind='mxg')
+g1 = parser.add_usage_group(kind='mxg')
 conflicter = g1.add_argument("--conflicter", action='store_true')
-g2 = g1.add_nested_group(kind='any', dest='(opt1 or opt2)',
+g2 = g1.add_usage_group(kind='any', dest='(opt1 or opt2)',
     # parens=['or(',')'],
     joiner=' or ',
     )

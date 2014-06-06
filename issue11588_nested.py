@@ -2,11 +2,11 @@ import argparse
 usage = 'PROG [-h] (-o FILE | (-O DIR & (-p PATTERN | -s SUFFIX)))'
 #usage = None
 parser = argparse.ArgumentParser(prog='PROG', usage=usage)
-g1 = parser.add_nested_group(dest='FILE or DIR', kind='mxg', required=True)
+g1 = parser.add_usage_group(dest='FILE or DIR', kind='mxg', required=True)
 a_file= g1.add_argument("-o", "--outfile", metavar='FILE')
-g2 = g1.add_nested_group(dest='DIR and PS', kind='inc')
+g2 = g1.add_usage_group(dest='DIR and PS', kind='inc')
 a_dir = g2.add_argument("-O", "--outdir", metavar='DIR')
-g3 = g2.add_nested_group(dest='P or S',
+g3 = g2.add_usage_group(dest='P or S',
     kind='mxg',
     parens='()',
     # joiner=' || ',

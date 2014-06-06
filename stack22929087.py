@@ -10,10 +10,10 @@ act_wid = spp.add_argument('--wid')
 act_w1 = spp.add_argument('--w1')
 act_w2 = spp.add_argument('--w2')
 
-grp2 = spp.add_nested_group(kind='mxg', required=True)  # 'exc'
+grp2 = spp.add_usage_group(kind='mxg', required=True)  # 'exc'
 grp2.add_argument(act_wid)
 
-grp1 = grp2.add_nested_group(kind='inc', dest='w1&w2')
+grp1 = grp2.add_usage_group(kind='inc', dest='w1&w2')
 grp1.add_argument(act_w1)
 grp1.add_argument(act_w2)
 # don't know how to express the not -g test with groups
@@ -23,13 +23,13 @@ def test_this_group(parser, seen_non_default_actions, *vargs, **kwargs):
     if act_g not in seen_actions and act_wid in seen_actions:
         parser.error('group3 error')
 
-grp3 = spp.add_nested_group(testfn=test_this_group, usage='(if not -g then not -wid)')
+grp3 = spp.add_usage_group(testfn=test_this_group, usage='(if not -g then not -wid)')
 print(grp3)
 """
 grp3.add_argument(act_g)
 grp3.add_argument(act_wid)
 #grp3.add_argument(grp1)
-grp3.add_nested_group(grp1)
+grp3.add_usage_group(grp1)
 if group testfn directly references the actions, and the usage is defined
 then nothing needs to be added to the group
 
