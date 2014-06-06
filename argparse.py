@@ -915,6 +915,12 @@ class MultiGroupHelpFormatter(HelpFormatter):
         joiner = getattr(group, 'joiner', ' | ')
         parens = '()' if group.required else '[]'
         parens = getattr(group, 'parens', parens) # let group define its own brackets
+        usage = getattr(group, 'usage', None)
+        if usage:
+            # shortcut if usage is given
+            # what actions, if any, should be returned
+            # safe to assume usage is a string, as opposed to list?
+            return [usage], {}
         seen_actions = set()
         actions = group._group_actions
         parts = []
@@ -1856,13 +1862,36 @@ class _ActionsContainer(object):
         container._mutually_exclusive_groups.append(group)
         return group
 
+    def add_mutually_exclusive_group(self, **kwargs):
+        kwargs.update(kind='mxg')
+        return self.add_nested_group(**kwargs)
+
     def add_nested_group(self, *args, **kwargs):
         group = _NestingGroup(self, *args, **kwargs)
-        #self._action_groups.append(group)
-        if group.fn is None:
-            # or test is self is not _NestingGroup
-            # should a nestingGroup have such a list?
-            self._mutually_exclusive_groups.append(group)
+        self._mutually_exclusive_groups.append(group)
+        return group
+
+    def add_nested_group(self, **kwargs):
+        # test replacing MXG with Nesting
+        # all test_argparse works with this replacement
+        # it's messy to have to list all these AG kwargs
+        if 'title' in kwargs:
+            args = kwargs.copy()
+            for k in kwargs.keys():
+                # simpler to specify what argument_group accepts than
+                # what nested_group might provide
+                if k not in ['title', 'description',
+                             'prefix_chars',
+                             'argument_default',
+                             'conflict_handler']:
+                    args.pop(k, None)
+            container = self.add_argument_group(**args)
+        else:
+            container = self
+        kwargs.pop('title', None)
+        kwargs.pop('description', None)
+        group = _NestingGroup(container, **kwargs)
+        container._mutually_exclusive_groups.append(group)
         return group
 
     def _add_action(self, action):
@@ -2096,13 +2125,13 @@ class _MutuallyExclusiveGroup(_ArgumentGroup):
         self._container = container
         # register the test for this type of group
         # self.register works since parser and groups share _registers
-        if self._registry_get('cross_tests','mxg', None) is None:
+        if self._registry_get('usage_tests','mxg', None) is None:
             # this test isn't essential, but in more general case we shouldn't
             # register the same test multiple times
             mytest = _MutuallyExclusiveGroup.test_mut_ex_groups
-            self.register('cross_tests', 'mxg', mytest)
+            self.register('usage_tests', 'mxg', mytest)
         name = str(id(self)) # a unique key for this test
-        self.register('cross_tests', name, self.test_this_group)
+        self.register('usage_tests', name, self.test_this_group)
 
     def _add_action(self, action):
         if action.required:
@@ -2182,12 +2211,17 @@ class _NestingGroup(_ArgumentGroup):
         required = kwargs.pop('required', False)
         parens = kwargs.pop('parens', None)
         joiner = kwargs.pop('joiner', None)
+        testfn = kwargs.pop('testfn', None)
+        usage = kwargs.pop('usage', None)
+        # or use a canned fn to produce only kwargs that AG recognizes
         super(_NestingGroup, self).__init__(container, **kwargs)
         self.container = container  # _container to be consistent with MXG
         self.dest = dest
         self.required = required
         self.parens = parens
         self.joiner = joiner
+        self.testfn = testfn
+        self.usage = usage
         if isinstance(container, ArgumentParser):
             self.parser = container
         else:
@@ -2197,29 +2231,30 @@ class _NestingGroup(_ArgumentGroup):
         # print(name,self.dest, self.kind)
         # subclass this?
         if self.kind in ['mxg','ecl','excl','exclusive','xor']:
-            fn = self.test_mx_group # mutually exclusive
+            testfn = self.test_mx_group # mutually exclusive
             joiner = ' | ' # something better for xor?
             parens = '()' if self.required else '[]'
         elif self.kind in ['inc','inclusive']:
-            fn = self.test_inc_group # inclusive
+            testfn = self.test_inc_group # inclusive
             joiner = ' & '
             parens = '()'
         elif self.kind in ['any']:
-            fn = self.test_any_group # any
+            testfn = self.test_any_group # any
             joiner =' | '
             parens = '{}'
         else:
-            fn = self.test_this_group
+            testfn = self.test_this_group
             joiner = ' , '
             parens = '()'
         if self.joiner is None: self.joiner = joiner
         if self.parens is None: self.parens = parens
+        if self.testfn is None: self.testfn = testfn
         if isinstance(self.container, _NestingGroup):
-            # save fn on self
-            self.fn = fn
-        else: # register fn with common register (container)
-            self.fn = None
-            self.container.register('cross_tests', name, fn)
+            pass
+        else:
+            # register testfn with common register (container)
+            self.container.register('usage_tests', name, self.testfn)
+            # self.testfn = None #?
         # attributes to help format this group
         # make it look like an action
         self.help = 'nested group help'
@@ -2238,8 +2273,14 @@ class _NestingGroup(_ArgumentGroup):
         return action
 
     def add_nested_group(self, *args, **kwargs):
-        # if this is nested group, add the new group to its own _group_actions
-        group = super(_NestingGroup, self).add_nested_group(*args, **kwargs)
+        if len(args) and isinstance(args[0], _NestingGroup):
+            group = args[0]
+            self._group_actions.append(group)
+            return group
+        # add to own list, not the parsers
+        kwargs.pop('title', None) # ignore at this level
+        # or give warning about ignored title?
+        group = _NestingGroup(self, *args, **kwargs)
         self._group_actions.append(group)
         return group
 
@@ -2248,7 +2289,8 @@ class _NestingGroup(_ArgumentGroup):
         if len(args) and isinstance(args[0], Action):
             # add the action to self, but not to the parser (already there)
             action =  args[0]
-            return self._group_actions.append(action)
+            self._group_actions.append(action)
+            return action
         else:
             return super(_NestingGroup, self).add_argument(*args, **kwargs)
 
@@ -2269,7 +2311,7 @@ class _NestingGroup(_ArgumentGroup):
         group_actions = self._group_actions
         actions = [a for a in group_actions if isinstance(a, Action)]
         groups = [a for a in group_actions if isinstance(a, _NestingGroup)]
-        okgroups = [a for a in groups if a.fn(parser, seen_actions, *vargs, **kwargs)]
+        okgroups = [a for a in groups if a.testfn(parser, seen_actions, *vargs, **kwargs)]
         okgroups = set(okgroups)
         # print('ok group', [g.dest for g in okgroups])
         # if a group tests as ok (no error) it counts as 'seen'
@@ -2403,9 +2445,9 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             return string
         self.register('type', None, identity)
 
-        # initialize cross_tests
-        # self.register('cross_tests', ?,?)
-        self._registries['cross_tests'] = {}
+        # initialize usage_tests
+        # self.register('usage_tests', ?,?)
+        self._registries['usage_tests'] = {}
 
         # add help argument if necessary
         # (using explicit default to override global argument_default)
@@ -2869,8 +2911,8 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # give user a hook to run more general tests on arguments
         # its primary purpose is to give the user access to seen_non_default_actions
         # I can't think of a case where seen_actions is better - so omit
-        for testkey, testfn in self._get_cross_tests():
-            testfn(self, seen_non_default_actions, seen_actions, namespace, extras, key=testkey)
+        for testfn in self._get_usage_tests():
+            testfn(self, seen_non_default_actions, seen_actions, namespace, extras)
 
         # return the updated namespace and the extra arguments
         return namespace, extras
@@ -3079,26 +3121,26 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # return true if  any action in a list, takes variable number of args
         return any(a._is_nargs_variable() for a in actions)
 
-    def _get_cross_tests(self):
+    def _get_usage_tests(self):
         # fetch a list (possibly empty) of tests to be run at the end of parsing
         # for example, the mutually_exclusive_group tests
         # or user supplied tests
         # issue11588
 
-        # this could be in a 'parser.cross_tests' attribute
-        # tests = getattr(self, 'cross_tests', [])
+        # this could be in a 'parser.usage_tests' attribute
+        # tests = getattr(self, 'usage_tests', [])
         # but here I am looking in the _registries
         # _registries is already shared among groups
         # allowing me to define the group tests in the group class itself
         # This use of _registries is slight non_standard since I am
         # ignoring the 2nd level keys
-        tests = self._registries['cross_tests'].items() # values()
+        tests = self._registries['usage_tests'].values()
         return tests
 
-    def crosstest(self, func):
+    def usagetest(self, func):
         # decorator to facilitate adding these functions
         name = func.__name__
-        self.register('cross_tests', name, func)
+        self.register('usage_tests', name, func)
 
     # ========================
     # Value conversion methods

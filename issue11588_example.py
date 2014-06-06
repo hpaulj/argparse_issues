@@ -27,7 +27,7 @@ def testwfnc(func):
             else:
                 return args[0] in actions
         return func(parser, seen)
-    parser.register('cross_tests', name, wrapped)
+    parser.register('usage_tests', name, wrapped)
     return wrapped
 
 #@testwfnc
@@ -97,11 +97,11 @@ def testwobj(func):
     def wrapped(parser, seen_actions, *args):
         seen = SeenActions(seen_actions)
         return func(parser, seen, *args)
-    parser.register('cross_tests', name, wrapped)
+    parser.register('usage_tests', name, wrapped)
     return wrapped
 # decorator form if added to ArgumentParser
-# def crosstest(self, func):
-#    self.register('cross_tests', name, func)
+# def usagetest(self, func):
+#    self.register('usage_tests', name, func)
 
 @testwobj
 def all_in_one(parser, seen, *args):

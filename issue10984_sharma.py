@@ -5,8 +5,8 @@ conflicter = parser.add_argument("--conflicter", action='store_true')
 opt1 = parser.add_argument("--opt1", action='store_true')
 opt2 = parser.add_argument("--opt2", action='store_true')
 
-@parser.crosstest
-def test(parser, seen_actions, *args, **kwargs):
+@parser.usagetest
+def test(parser, seen_actions, *args):
     if conflicter in seen_actions:
         # if 0<len(seen_actions.intersection([opt1, opt2])):
         if opt1 in seen_actions or opt2 in seen_actions:
@@ -16,7 +16,6 @@ try:
 except SystemExit:
     pass
 
-# should remove the kwarg for cross test, no longer need
 
 
 parser = argparse.ArgumentParser(formatter_class=argparse.MultiGroupHelpFormatter)
