@@ -1,6 +1,6 @@
 import argparse
 parser=argparse.ArgumentParser()
-parser=argparse.ArgumentParser(formatter_class=argparse.MultiGroupHelpFormatter)
+parser=argparse.ArgumentParser(formatter_class=argparse.UsageGroupHelpFormatter)
 g1=parser.add_mutually_exclusive_group(title='test group', description='ddddddddddddd')
 fooAction = g1.add_argument('--foo')
 g2=parser.add_mutually_exclusive_group()

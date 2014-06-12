@@ -73,7 +73,7 @@ __all__ = [
     'RawTextHelpFormatter',
     'MetavarTypeHelpFormatter',
     'CompactHelpFormatter',
-    'MultiGroupHelpFormatter',
+    'UsageGroupHelpFormatter',
     'Namespace',
     'Action',
     'UsageGroup',
@@ -748,7 +748,7 @@ class CompactHelpFormatter(HelpFormatter):
             return ', '.join(parts)
 
 # from multigroup, issue 10984
-class MultiGroupHelpFormatter(HelpFormatter):
+class UsageGroupHelpFormatter(HelpFormatter):
     """Help message formatter that handles overlapping mutually exclusive
     groups.
 
@@ -1875,22 +1875,15 @@ class _ActionsContainer(object):
     def add_usage_group(self, **kwargs):
         # test replacing MXG with Nesting
         # all test_argparse works with this replacement
-        # it's messy to have to list all these AG kwargs
         if 'title' in kwargs:
-            args = kwargs.copy()
-            for k in kwargs.keys():
-                # simpler to specify what argument_group accepts than
-                # what usage_group might provide
-                if k not in ['title', 'description',
-                             'prefix_chars',
-                             'argument_default',
-                             'conflict_handler']:
-                    args.pop(k, None)
+            ag_keys = ['title', 'description', 'prefix_chars',
+                       'argument_default', 'conflict_handler']
+            args = {k:kwargs[k] for k in ag_keys if k in kwargs}
             container = self.add_argument_group(**args)
         else:
             container = self
-        kwargs.pop('title', None)
-        kwargs.pop('description', None)
+        #kwargs.pop('title', None)
+        #kwargs.pop('description', None)
         group = UsageGroup(container, **kwargs)
         container._mutually_exclusive_groups.append(group)
         return group
@@ -2126,11 +2119,13 @@ class _MutuallyExclusiveGroup(_ArgumentGroup):
         self._container = container
         # register the test for this type of group
         # self.register works since parser and groups share _registers
+        """
         if self._registry_get('usage_tests','mxg', None) is None:
             # this test isn't essential, but in more general case we shouldn't
             # register the same test multiple times
             mytest = _MutuallyExclusiveGroup.test_mut_ex_groups
             self.register('usage_tests', 'mxg', mytest)
+        """
         name = str(id(self)) # a unique key for this test
         self.register('usage_tests', name, self.test_this_group)
 
@@ -2204,49 +2199,56 @@ class _MutuallyExclusiveGroup(_ArgumentGroup):
             parser.error(msg % ' '.join(names))
         print('mxg testing',[a.dest for a in group_actions])
 
-class UsageGroup(_ArgumentGroup):
+class UsageGroup(_AttributeHolder, _ArgumentGroup):
 
     def __init__(self, container, **kwargs):
-        kind = kwargs.pop('kind', None)
-        dest = kwargs.pop('dest', '')
-        required = kwargs.pop('required', False)
-        parens = kwargs.pop('parens', None)
-        joiner = kwargs.pop('joiner', None)
-        testfn = kwargs.pop('testfn', None)
-        usage = kwargs.pop('usage', None)
-        # or use a canned fn to produce only kwargs that AG recognizes
-        super(UsageGroup, self).__init__(container, **kwargs)
+        # call super with subset of the kwargs
+        ag_keys = ['title', 'description', 'prefix_chars',
+                    'argument_default', 'conflict_handler']
+        args = {k:kwargs[k] for k in ag_keys if k in kwargs}
+        super(UsageGroup, self).__init__(container, **args)
         self.container = container  # _container to be consistent with MXG
-        self.dest = dest
-        self.required = required
-        self.parens = parens
-        self.joiner = joiner
-        self.testfn = testfn
-        self.usage = usage
+        self.dest = kwargs.pop('dest', '')
+        self.required = kwargs.pop('required', False)
+        self.parens = kwargs.pop('parens', None)
+        self.joiner = kwargs.pop('joiner', None)
+        self.testfn = kwargs.pop('testfn', None)
+        self.usage = kwargs.pop('usage', None)
+        self.kind = kwargs.pop('kind', None)
         if isinstance(container, ArgumentParser):
-            self.parser = container
+            self.parser = container # place to put Actions
         else:
             self.parser = getattr(container, 'parser', container)
-        self.kind = kind
+
+        self.register_test()
+        # potentially might define Action like attributes to help format it
+        # e.g. help, option_strings
+        for k in ag_keys: kwargs.pop(k, None)
+        if len(kwargs.keys()):
+            print('left over kwargs:', kwargs)
+
+    def _get_kwargs(self):
+        names = [
+            'dest',
+            'usage',
+            'kind',
+            'required'
+        ]
+        return [(name, getattr(self, name)) for name in names]
+
+
+    def register_test(self):
         name = str(id(self)) # a unique key for this test
-        # print(name,self.dest, self.kind)
-        # subclass this?
-        if self.kind in ['mxg','ecl','excl','exclusive','xor']:
-            testfn = self.test_mx_group # mutually exclusive
-            joiner = ' | ' # something better for xor?
-            parens = '()' if self.required else '[]'
-        elif self.kind in ['inc','inclusive']:
-            testfn = self.test_inc_group # inclusive
-            joiner = ' & '
-            parens = '()'
-        elif self.kind in ['any']:
-            testfn = self.test_any_group # any
-            joiner =' | '
-            parens = '{}'
+        if self.kind in ['mxg', 'ecl', 'excl', 'exclusive', 'xor']:
+            joiner, parens, testfn = self.test_mx_group()
+        elif self.kind in ['inc', 'inclusive', 'all']:
+            joiner, parens, testfn = self.test_inc_group()
+        elif self.kind in ['any', 'or']:
+            joiner, parens, testfn = self.test_not_group()
+        elif self.kind in ['not']:
+            joiner, parens, testfn = self.test_not_group()
         else:
-            testfn = self.test_this_group
-            joiner = ' , '
-            parens = '()'
+            joiner, parens, testfn = self.test_not_group()
         if self.joiner is None: self.joiner = joiner
         if self.parens is None: self.parens = parens
         if self.testfn is None: self.testfn = testfn
@@ -2255,11 +2257,6 @@ class UsageGroup(_ArgumentGroup):
         else:
             # register testfn with common register (container)
             self.container.register('usage_tests', name, self.testfn)
-            # self.testfn = None #?
-        # attributes to help format this group
-        # make it look like an action
-        self.help = 'nested group help'
-        self.option_strings = ''
 
     def _format_args(self, *args):
         return ''
@@ -2295,82 +2292,100 @@ class UsageGroup(_ArgumentGroup):
         else:
             return super(UsageGroup, self).add_argument(*args, **kwargs)
 
-    def test_this_group(self, parser, seen_non_default_actions, *vargs, **kwargs):
-        # test to be run near end of parsing
-        seen_actions = set(seen_non_default_actions)
-
-        group_actions = self._group_actions
-        group_seen = seen_actions.intersection(group_actions)
-        cnt = len(group_seen)
-        print('nested testing',[a.dest for a in group_actions])
+    def raise_error(self, parser, msg):
+        names = [action.dest for action in self._group_actions]
+        names = ', '.join(names)
+        msg = msg % names
+        if self.dest:
+            msg = '%s: %s'%(self.dest, msg)
+        parser.error(msg)
 
     def count_actions(self, parser, seen_actions, *vargs, **kwargs):
         # utility that is useful in most kinds of tests
-        # count the number of actions that were seen
-        # handles nested groups
+        # count the number of group actions (and groups) that are seen
         seen_actions = set(seen_actions)
         group_actions = self._group_actions
         actions = [a for a in group_actions if isinstance(a, Action)]
+        okactions = {a for a in actions if a in seen_actions}
         groups = [a for a in group_actions if isinstance(a, UsageGroup)]
-        okgroups = [a for a in groups if a.testfn(parser, seen_actions, *vargs, **kwargs)]
-        okgroups = set(okgroups)
-        # print('ok group', [g.dest for g in okgroups])
-        # if a group tests as ok (no error) it counts as 'seen'
-        group_seen = seen_actions.intersection(actions)
-        group_seen = group_seen.union(okgroups)
-        cnt = len(group_seen)
+        okgroups = {a for a in groups if a.testfn(parser, seen_actions, *vargs, **kwargs)}
+        okactions = okactions.union(okgroups)
+        cnt = len(okactions)
         return cnt
 
-    def test_mx_group(self, parser, seen_non_default_actions, *vargs, **kwargs):
+    def test_this_group(self):
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            # default usage test
+            group_actions = self._group_actions
+            group_seen = set(seen_actions).intersection(group_actions)
+            cnt = len(group_seen)
+            print('nested testing',[a.dest for a in group_actions])
+        return ', ', '()', testfn
+
+    def test_mx_group(self):
+        joiner = ' | ' # something better for xor?
+        parens = '()' if self.required else '[]'
         # test equivalent the mutually_exclusive_groups
-        seen_actions = set(seen_non_default_actions)
-
-        group_actions = self._group_actions
-        cnt = self.count_actions(parser, seen_non_default_actions, *vargs, **kwargs)
-        if cnt > 1:
-            msg = '%s: only one the arguments [%s] is allowed'
-        elif cnt == 0 and self.required:
-            msg = '%s: one of the arguments [%s] is required'
-        else:
-            msg = None
-        if msg:
-            names = ' '.join([action.dest for action in group_actions])
-            parser.error(msg % (self.dest, names))
-        return cnt>0 # True if something present, False if none
-
-    def test_inc_group(self, parser, seen_non_default_actions, *vargs, **kwargs):
-        # inclusive group - if one is present, all must be present
-        # if group is required, all are required
-        group_actions = self._group_actions
-        cnt = self.count_actions(parser, seen_non_default_actions, *vargs, **kwargs)
-        if cnt > 0: # if any
-            if cnt < len(group_actions): # all
-                msg = '%s: all of the arguments [%s] are required'
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            if cnt > 1:
+                msg = 'only one the arguments [%s] is allowed'
+            elif cnt == 0 and self.required:
+                msg = 'one of the arguments [%s] is required'
             else:
                 msg = None
-        elif cnt == 0 and self.required:
-            msg = '%s: all of the arguments [%s] is required'
-        else:
-            msg = None
-        if msg:
-            names = ' '.join([action.dest for action in group_actions])
-            parser.error(msg % (self.dest, names))
-        print('inc testing',[a.dest for a in group_actions])
-        return cnt>0
+            if msg:
+                self.raise_error(parser, msg)
+            return cnt>0 # True if something present, False if none
+        return joiner, parens, testfn
 
-    def test_any_group(self, parser, seen_non_default_actions, *vargs, **kwargs):
-        # any may be present (or atleast one if group is required)
-        group_actions = self._group_actions
-        cnt = self.count_actions(parser, seen_non_default_actions, *vargs, **kwargs)
-        if cnt == 0 and self.required:
-            msg = 'some of the arguments %s is required'
-        else:
-            msg = None
-        if msg:
-            names = [action.dest for action in group_actions]
-            parser.error(msg % ' '.join(names))
-        print('any testing',[a.dest for a in group_actions])
-        return cnt>0
+    def test_inc_group(self):
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            # inclusive group - if one is present, all must be present
+            # if group is required, all are required
+            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+
+            if cnt == 0 and self.required:
+                msg = 'all of the arguments [%s] is required'
+            elif 0 < cnt < len(self._group_actions): # all
+                    msg = 'all of the arguments [%s] are required'
+            else:
+                msg = None
+            if msg:
+                self.raise_error(parser, msg)
+            print('inc testing',cnt, [a.dest for a in self._group_actions])
+            return cnt>0
+        return ' & ', '()', testfn
+
+    def test_any_group(self):
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            # any may be present (but at least one if group is required)
+            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            if cnt == 0 and self.required:
+                msg = 'some of the arguments [%s] is required'
+            else:
+                msg = None
+            if msg:
+                self.raise_error(parser, msg)
+            print('any testing',[a.dest for a in self._group_actions])
+            return cnt>0
+        return ' | ', '{}', testfn
+
+    def test_not_group(self):
+        joiner = ', '
+        parens = ['not(',')']
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            # not present
+            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            print('not test', cnt, [a.dest for a in self._group_actions])
+            if cnt > 0 and self.required:
+                msg = 'none of the arguments [%s] is allowed'
+            else:
+                msg = None
+            if msg:
+                self.raise_error(parser, msg)
+            return cnt==0
+        return joiner, parens, testfn
 
     # group_actions can include actions and other UsageGroups
     # 'kind' denotes some sort of test, e.g. like mut-exclusive

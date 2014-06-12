@@ -38,7 +38,7 @@ for test in [['-o FILE', ''],
         pass
     print()
 
-parser.formatter_class=argparse.MultiGroupHelpFormatter
+parser.formatter_class=argparse.UsageGroupHelpFormatter
 parser.print_usage()
 parser.usage =None
 parser.print_usage()

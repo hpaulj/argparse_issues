@@ -3,7 +3,7 @@ parser = argparse.ArgumentParser(
         #description='this is the description',
         #epilog="This is the epilog",
         #argument_default=argparse.SUPPRESS
-        formatter_class=argparse.MultiGroupHelpFormatter
+        formatter_class=argparse.UsageGroupHelpFormatter
         )
 
 parser.add_argument('-v', '--verbose', help='verbose', action='store_true', default=False)
@@ -43,7 +43,7 @@ actions added to group_simulate are added to root_group
 so all 7 actions are mutulally exclusive
 
 in this corrected formatter, 'root_group' is formatted, but not theotherss
-with the MultiGroup formatter, all 3 groups are formatted (but not nested)
+with the UsageGroup formatter, all 3 groups are formatted (but not nested)
 
 http://stackoverflow.com/questions/14660876/python-dependencies-between-groups-using-argparse
 

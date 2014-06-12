@@ -18,7 +18,7 @@ except SystemExit:
 
 
 
-parser = argparse.ArgumentParser(formatter_class=argparse.MultiGroupHelpFormatter)
+parser = argparse.ArgumentParser(formatter_class=argparse.UsageGroupHelpFormatter)
 g1 = parser.add_usage_group(kind='mxg')
 conflicter = g1.add_argument("--conflicter", action='store_true')
 g2 = g1.add_usage_group(kind='any', dest='(opt1 or opt2)',
