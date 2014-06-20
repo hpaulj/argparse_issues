@@ -1,0 +1,36 @@
+couple of old issues added to my watch list
+
+- more flexible help, possibly working with a format template string
+
+- put subparsers in groups
+   current dev also has 'yield from ..` in the subparser formatting
+   that limits its back portability
+
+- i wonder if contexts can improve its readability
+    wrote section and indent contexts - they work
+    but they aren't used frequent enough to make much difference
+    also no error trapping problems
+
+"""My Program, version 3.5
+Usage: %(usage)s
+
+Some description of my program
+
+%(argument_groups)%
+
+My epliog text
+"""
+
+-------------------------------
+parser.custom_help() - a formatter that takes a template
+    the default template replicates parser.format_help (pass test_argparser)
+    it requires the same blank line cleanup
+issue11695_test.py
+    tests with a template similar to that given in the issue
+
+for now the %(...)s must be first thing in their line
+otherwise indenting of multiline blocks gets messed up
+for the issue example, I've made the usage 'prefix' a parameter
+
+I need to generate a patch from this
+also make a git branch

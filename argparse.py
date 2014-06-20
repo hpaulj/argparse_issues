@@ -89,6 +89,7 @@ import os as _os
 import re as _re
 import sys as _sys
 import textwrap as _textwrap
+from contextlib import contextmanager as _contextmanager
 
 from gettext import gettext as _, ngettext
 
@@ -268,6 +269,18 @@ class HelpFormatter(object):
     def add_arguments(self, actions):
         for action in actions:
             self.add_argument(action)
+
+    @_contextmanager
+    def add_section(self, heading):
+        self.start_section(heading)
+        yield
+        self.end_section()
+
+    @_contextmanager
+    def new_indent(self):
+        self._indent()
+        yield
+        self._dedent()
 
     # =======================
     # Help-formatting methods
@@ -605,9 +618,10 @@ class HelpFormatter(object):
         except AttributeError:
             pass
         else:
-            self._indent()
-            yield from get_subactions()
-            self._dedent()
+            # new: context, 2.7 compatible yield
+            with self.new_indent():
+                for subaction in get_subactions():
+                    yield subaction
 
     def _split_lines(self, text, width):
         text = self._whitespace_matcher.sub(' ', text).strip()
@@ -680,8 +694,6 @@ class MetavarTypeHelpFormatter(HelpFormatter):
 
     def _get_default_metavar_for_positional(self, action):
         return action.type.__name__
-
-
 
 # =====================
 # Options and Arguments
@@ -2316,11 +2328,11 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         formatter.add_text(self.description)
 
         # positionals, optionals and user-defined groups
+        # new context
         for action_group in self._action_groups:
-            formatter.start_section(action_group.title)
-            formatter.add_text(action_group.description)
-            formatter.add_arguments(action_group._group_actions)
-            formatter.end_section()
+            with formatter.add_section(action_group.title):
+                formatter.add_text(action_group.description)
+                formatter.add_arguments(action_group._group_actions)
 
         # epilog
         formatter.add_text(self.epilog)
@@ -2330,6 +2342,105 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
 
     def _get_formatter(self):
         return self.formatter_class(prog=self.prog)
+
+    def custom_help(self, template=None, prefix=None):
+        if template is None:
+            template = """\
+            %(usage)s
+
+            %(description)s
+
+            %(argument_groups)s
+
+            %(epilog)s
+            """
+            template = _textwrap.dedent(template)
+            # may need to clear beginning blanks
+        def usage(self):
+            formatter = self._get_formatter()
+            formatter.add_usage(self.usage, self._actions,
+                self._mutually_exclusive_groups, prefix)
+            return formatter.format_help().strip()
+        def groups(self):
+            formatter = self._get_formatter()
+            for action_group in self._action_groups:
+                formatter.start_section(action_group.title)
+                formatter.add_text(action_group.description)
+                formatter.add_arguments(action_group._group_actions)
+                formatter.end_section()
+            astr = formatter.format_help().rstrip()
+            return astr
+        def description(self):
+            formatter = self._get_formatter()
+            formatter.add_text(self.description)
+            return formatter.format_help().rstrip()
+        def epilog(self):
+            formatter = self._get_formatter()
+            formatter.add_text(self.epilog)
+            return formatter.format_help().rstrip()
+        dd = dict(
+            usage=usage(self),
+            description = description(self),
+            argument_groups=groups(self),
+            epilog=epilog(self),
+            )
+        help = template%dd
+        # from formatter.format_help; getting number blank lines correct
+        help = _re.sub(r'\n\n\n+', '\n\n', help)
+        help = help.strip('\n') + '\n'
+        return help
+
+    def custom_help(self, template=None, prefix=None):
+        if template is None:
+            # default acts like original format_help()
+            template = """\
+            %(usage)s
+
+            %(description)s
+
+            %(argument_groups)s
+
+            %(epilog)s
+            """
+            template = _textwrap.dedent(template)
+            # may need to clear beginning blanks
+        def with_formatter(func):
+            def wrapped(self):
+                formatter = self._get_formatter()
+                func(self, formatter)
+                return formatter.format_help().strip()
+            return wrapped
+        @with_formatter
+        def usage(self, formatter):
+            formatter.add_usage(self.usage, self._actions,
+                    self._mutually_exclusive_groups, prefix)
+        @with_formatter
+        def groups(self, formatter):
+            for action_group in self._action_groups:
+                with formatter.add_section(action_group.title):
+                    formatter.add_text(action_group.description)
+                    formatter.add_arguments(action_group._group_actions)
+        @with_formatter
+        def description(self, formatter):
+            formatter.add_text(self.description)
+        @with_formatter
+        def epilog(self, formatter):
+            formatter.add_text(self.epilog)
+        dd = dict(
+            usage=usage(self),
+            description = description(self),
+            argument_groups=groups(self),
+            epilog=epilog(self),
+            )
+        help = template%dd
+        # from formatter.format_help; getting number blank lines correct
+        help = _re.sub(r'\n\n\n+', '\n\n', help)
+        help = help.strip('\n') + '\n'
+        return help
+
+    def format_help(self):
+        # test custom_help as substitute for orginal format_help
+        return self.custom_help()
 
     # =====================
     # Help-printing methods

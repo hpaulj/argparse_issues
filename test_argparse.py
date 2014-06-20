@@ -4904,6 +4904,108 @@ class TestImportStar(TestCase):
         ]
         self.assertEqual(sorted(items), sorted(argparse.__all__))
 
+# ========================
+# custom help layout tests
+# ========================
+
+class TestCustomLayout(TestCase):
+    # issue 11695
+    template = textwrap.dedent("""\
+    My Program, version 3.5
+    %(usage)s
+
+    Some description of my program
+
+    %(argument_groups)s
+
+    My epilog text
+    """)
+    def test_basic_parser(self):
+        parser = argparse.ArgumentParser(prog='PROG')
+        parser.add_argument('--foo')
+        parser.add_argument('bar')
+        self.assertEqual(parser.format_help(), textwrap.dedent('''\
+            usage: PROG [-h] [--foo FOO] bar
+
+            positional arguments:
+              bar
+
+            optional arguments:
+              -h, --help  show this help message and exit
+              --foo FOO
+            '''))
+
+        self.assertEqual(parser.custom_help(self.template, prefix='Usage: '),
+            textwrap.dedent('''\
+            My Program, version 3.5
+            Usage: PROG [-h] [--foo FOO] bar
+
+            Some description of my program
+
+            positional arguments:
+              bar
+
+            optional arguments:
+              -h, --help  show this help message and exit
+              --foo FOO
+
+            My epilog text
+            '''))
+
+    def test_wrapped_lines(self):
+        # for now wrapping only works if template items start at left
+        parser = argparse.ArgumentParser(prog='LONG_PROGRAM_NAME')
+        parser.add_argument('--long_optionals_argument_name',
+            help='optionals help line', metavar='LONGISH_METVAR')
+        parser.add_argument('long_positional_argument_name')
+        self.assertEqual(parser.format_help(), textwrap.dedent('''\
+            usage: LONG_PROGRAM_NAME [-h] [--long_optionals_argument_name LONGISH_METVAR]
+                                     long_positional_argument_name
+
+            positional arguments:
+              long_positional_argument_name
+
+            optional arguments:
+              -h, --help            show this help message and exit
+              --long_optionals_argument_name LONGISH_METVAR
+                                    optionals help line
+            '''))
+
+        self.assertEqual(parser.custom_help(self.template, prefix='Usage: '),
+            textwrap.dedent('''\
+            My Program, version 3.5
+            Usage: LONG_PROGRAM_NAME [-h] [--long_optionals_argument_name LONGISH_METVAR]
+                                     long_positional_argument_name
+
+            Some description of my program
+
+            positional arguments:
+              long_positional_argument_name
+
+            optional arguments:
+              -h, --help            show this help message and exit
+              --long_optionals_argument_name LONGISH_METVAR
+                                    optionals help line
+
+            My epilog text
+            '''))
+
+    def test_bare_parser(self):
+        parser = argparse.ArgumentParser(prog='PROG', add_help=False)
+        self.assertEqual(parser.format_help(), textwrap.dedent('''\
+            usage: PROG
+            '''))
+
+        self.assertEqual(parser.custom_help(self.template, prefix='Usage: '),
+            textwrap.dedent('''\
+            My Program, version 3.5
+            Usage: PROG
+
+            Some description of my program
+
+            My epilog text
+            '''))
+
 def test_main():
     support.run_unittest(__name__)
     # Remove global references to avoid looking like we have refleaks.
