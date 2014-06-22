@@ -2390,7 +2390,14 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         help = help.strip('\n') + '\n'
         return help
 
-    def custom_help(self, template=None, prefix=None):
+    def with_formatter(self, func):
+        def wrapped(self):
+            formatter = self._get_formatter()
+            func(self, formatter)
+            return formatter.format_help().strip()
+        return wrapped
+
+    def custom_help(self, template=None, prefix=None, use_format=False):
         if template is None:
             # default acts like original format_help()
             template = """\
@@ -2404,35 +2411,33 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             """
             template = _textwrap.dedent(template)
             # may need to clear beginning blanks
-        def with_formatter(func):
-            def wrapped(self):
-                formatter = self._get_formatter()
-                func(self, formatter)
-                return formatter.format_help().strip()
-            return wrapped
-        @with_formatter
+        @self.with_formatter
         def usage(self, formatter):
             formatter.add_usage(self.usage, self._actions,
                     self._mutually_exclusive_groups, prefix)
-        @with_formatter
+        @self.with_formatter
         def groups(self, formatter):
             for action_group in self._action_groups:
                 with formatter.add_section(action_group.title):
                     formatter.add_text(action_group.description)
                     formatter.add_arguments(action_group._group_actions)
-        @with_formatter
+        @self.with_formatter
         def description(self, formatter):
             formatter.add_text(self.description)
-        @with_formatter
+        @self.with_formatter
         def epilog(self, formatter):
             formatter.add_text(self.epilog)
+
         dd = dict(
             usage=usage(self),
             description = description(self),
             argument_groups=groups(self),
             epilog=epilog(self),
             )
-        help = template%dd
+        if use_format:
+            help = template.format(**dd)
+        else:
+            help = template%dd
         # from formatter.format_help; getting number blank lines correct
         help = _re.sub(r'\n\n\n+', '\n\n', help)
         help = help.strip('\n') + '\n'
