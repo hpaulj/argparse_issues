@@ -4904,6 +4904,40 @@ class TestImportStar(TestCase):
         ]
         self.assertEqual(sorted(items), sorted(argparse.__all__))
 
+# =====================
+# test subparser groups
+# =====================
+
+    def test_simple_group(self):
+        #
+        parser = argparse.ArgumentParser(prog='PROG')
+        cmd = parser.add_subparsers(dest='cmd')
+        grp1 = cmd.add_parser_group('group1:')
+        grp1.add_parser('a', help='a subcommand help', aliases=['a1','a2'])
+        grp1.add_parser('b', help='b subcommand help')
+        grp1.add_parser('c', help='c subcommand help')
+        grp2 = cmd.add_parser_group('group2:')
+        grp2.add_parser('d', help='d subcommand help')
+        grp2.add_parser('e', help='e subcommand help', aliases=['e1'])
+
+        self.assertEqual(parser.format_help(), textwrap.dedent('''\
+            usage: PROG [-h] {a,a1,a2,b,c,d,e,e1} ...
+
+            positional arguments:
+              {a,a1,a2,b,c,d,e,e1}
+                group1:
+                  a (a1, a2)        a subcommand help
+                  b                 b subcommand help
+                  c                 c subcommand help
+                group2:
+                  d                 d subcommand help
+                  e (e1)            e subcommand help
+
+            optional arguments:
+              -h, --help            show this help message and exit
+            '''))
+
+
 def test_main():
     support.run_unittest(__name__)
     # Remove global references to avoid looking like we have refleaks.

@@ -1051,6 +1051,30 @@ class _SubParsersAction(Action):
             sup = super(_SubParsersAction._ChoicesPseudoAction, self)
             sup.__init__(option_strings=[], dest=dest, help=help,
                          metavar=metavar)
+    class _PseudoGroup(Action):
+
+        def __init__(self, container, title):
+            sup = super(_SubParsersAction._PseudoGroup, self)
+            sup.__init__(option_strings=[], dest=title)
+            self.container = container
+            self._choices_actions = []
+
+        def add_parser(self, name, **kwargs):
+            # add the parser to the main Action, but move the pseudo action
+            # in the group's own list
+            parser = self.container.add_parser(name, **kwargs)
+            choice_action = self.container._choices_actions.pop()
+            self._choices_actions.append(choice_action)
+            return parser
+
+        def _get_subactions(self):
+            return self._choices_actions
+
+        def add_parser_group(self, title):
+            # the formatter can handle recursive subgroups
+            grp = _SubParsersAction._PseudoGroup(self, title)
+            self._choices_actions.append(grp)
+            return grp
 
     def __init__(self,
                  option_strings,
@@ -1072,6 +1096,12 @@ class _SubParsersAction(Action):
             choices=self._name_parser_map,
             help=help,
             metavar=metavar)
+
+    def add_parser_group(self, title):
+        #
+        grp = _SubParsersAction._PseudoGroup(self, title)
+        self._choices_actions.append(grp)
+        return grp
 
     def add_parser(self, name, **kwargs):
         # set prog from the existing prefix
