@@ -1252,6 +1252,7 @@ class TestNargsRemainder(ParserTestCase):
         ('-z Z X', NS(x='X', y=[], z='Z')),
         ('X A B -z Z', NS(x='X', y=['A', 'B', '-z', 'Z'], z=None)),
         ('X Y --foo', NS(x='X', y=['Y', '--foo'], z=None)),
+        ('X -z Z A B', NS(x='X', y=['A', 'B'], z='Z')),
     ]
 
 
