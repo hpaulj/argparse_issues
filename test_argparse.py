@@ -2066,6 +2066,44 @@ class TestAddSubparsers(TestCase):
                 3                   3 help
             """))
 
+    def test_dbldash_before_subparser(self):
+        """Test use of '--' to end a variable list of arguments for an optional
+        prior to a subparser command
+        issue 9571
+        """
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument('--list', nargs='+')
+        subparsers = parser.add_subparsers(dest='cmd')
+        parser1 = subparsers.add_parser('cmd1')
+        parser1.add_argument('A', nargs='+')
+
+        self.assertEqual(NS(A=['A', 'B'], cmd='cmd1', list=['1', '2']),
+                         parser.parse_args('--list 1 2 -- cmd1 A B'.split()))
+        # undesirable result when --list is not terminated
+        # and subparsers is not required
+        self.assertEqual(NS(cmd=None, list=['1', '2', 'cmd1', 'A', 'B']),
+                         parser.parse_args('--list 1 2 cmd1 A B'.split()))
+        # temporary fix; subparser should be required by default
+        subparsers.required = True
+        self.assertArgumentParserError(parser.parse_args,
+                                       '--list 1 2 cmd1 A B'.split())
+
+    def test_dbldash_before_remainder(self):
+        """Test use of '--' to end a variable list of arguments for an optional
+        prior to a remainder
+        issue 9571
+        """
+        parser = ErrorRaisingArgumentParser()
+        parser.add_argument('--list', nargs='+')
+        parser.add_argument('rest', nargs='...')
+
+        self.assertEqual(NS(list=['1', '2'], rest=['cmd1', 'A', 'B']),
+                         parser.parse_args('--list 1 2 -- cmd1 A B'.split()))
+        # previous code produced
+        # NS(list=['1', '2'], rest=['--', 'cmd1', 'A', 'B']
+        self.assertEqual(NS(list=['1', '2', 'cmd1', 'A', 'B'], rest=[]),
+                         parser.parse_args('--list 1 2 cmd1 A B'.split()))
+
 # ============
 # Groups tests
 # ============

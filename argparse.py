@@ -2217,6 +2217,10 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 arg_strings.remove('--')
             except ValueError:
                 pass
+        else:
+            # remove '--' if it is the first string, issue9571
+            if arg_strings and arg_strings[0] == '--':
+                arg_strings = arg_strings[1:]
 
         # optional argument produces a default when not present
         if not arg_strings and action.nargs == OPTIONAL:
