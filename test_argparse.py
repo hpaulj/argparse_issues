@@ -4153,6 +4153,7 @@ class TestInvalidArgumentConstructors(TestCase):
     def test_invalid_type(self):
         self.assertValueError('--foo', type='int')
         self.assertValueError('--foo', type=(int, float))
+        #self.assertTypeError('--foo', type=dict(one=1,two=20).get)  # issue16516
 
     def test_invalid_action(self):
         self.assertValueError('-x', action='foo')
@@ -4671,6 +4672,29 @@ class TestTypeFunctionCalledOnDefault(TestCase):
                             default=[], action='append')
         args = parser.parse_args([])
         self.assertEqual(args.test, [])
+
+# =======================
+# unhashable type tests
+# =======================
+
+class TestUnhasableTypeError(TestCase):
+
+    @unittest.skip('')
+    def test_unhashable_type_error(self):
+        "error with original code"
+        dd = dict(one=1, two=20, three=300)
+        parser = ErrorRaisingArgumentParser(prog='PROG', add_help=False)
+        with self.assertRaises(TypeError) as cm:
+            parser.add_argument('x', type=dd.get)
+        msg = str(cm.exception)
+        self.assertRegex(msg, 'unhashable type')
+
+    def test_unhashable_type_noerror(self):
+        "_registry_get accounts for unhashable"
+        dd = dict(one=1, two=20, three=300)
+        parser = ErrorRaisingArgumentParser(prog='PROG', add_help=False)
+        parser.add_argument('x', type=dd.get)
+        parser.parse_args('two'.split())
 
 # ======================
 # parse_known_args tests

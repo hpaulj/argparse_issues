@@ -1263,7 +1263,12 @@ class _ActionsContainer(object):
         registry[value] = object
 
     def _registry_get(self, registry_name, value, default=None):
-        return self._registries[registry_name].get(value, default)
+        try:
+            return self._registries[registry_name].get(value, default)
+        except TypeError:
+            # probably TypeError: unhashable type: 'dict', issue16516
+            # e.g. {}.get
+            return default
 
     # ==================================
     # Namespace default accessor methods
