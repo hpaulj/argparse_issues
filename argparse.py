@@ -1266,8 +1266,7 @@ class _ActionsContainer(object):
         try:
             return self._registries[registry_name].get(value, default)
         except TypeError:
-            # probably TypeError: unhashable type: 'dict', issue16516
-            # e.g. {}.get
+            # probably TypeError: unhashable type: 'dict', e.g. {}.get
             return default
 
     # ==================================
