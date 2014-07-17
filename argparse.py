@@ -89,6 +89,7 @@ import os as _os
 import re as _re
 import sys as _sys
 import textwrap as _textwrap
+import shutil as _shutil
 
 from gettext import gettext as _, ngettext
 
@@ -156,10 +157,7 @@ class HelpFormatter(object):
 
         # default setting for width
         if width is None:
-            try:
-                width = int(_os.environ['COLUMNS'])
-            except (KeyError, ValueError):
-                width = 80
+            width = _shutil.get_terminal_size().columns
             width -= 2
 
         self._prog = prog
