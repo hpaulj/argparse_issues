@@ -80,6 +80,7 @@ __all__ = [
     'REMAINDER',
     'SUPPRESS',
     'ZERO_OR_MORE',
+    'NoWrap',
 ]
 
 
@@ -136,6 +137,17 @@ def _ensure_value(namespace, name, value):
         setattr(namespace, name, value)
     return getattr(namespace, name)
 
+class NoWrap(str):
+    # wrapper to flag a string that should not be wrapped
+    pass
+
+def _no_wrap_format(text, adict):
+    # % format preserving the NoWrap class if needed
+    if isinstance(text, NoWrap):
+        text = text % adict
+        return NoWrap(text)
+    else:
+        return text % adict
 
 # ===============
 # Formatting Help
@@ -475,7 +487,7 @@ class HelpFormatter(object):
 
     def _format_text(self, text):
         if '%(prog)' in text:
-            text = text % dict(prog=self._prog)
+            text = _no_wrap_format(text, dict(prog=self._prog))
         text_width = self._width - self._current_indent
         indent = ' ' * self._current_indent
         return self._fill_text(text, text_width, indent) + '\n\n'
@@ -597,7 +609,7 @@ class HelpFormatter(object):
         if params.get('choices') is not None:
             choices_str = ', '.join([str(c) for c in params['choices']])
             params['choices'] = choices_str
-        return self._get_help_string(action) % params
+        return _no_wrap_format(self._get_help_string(action), params)
 
     def _iter_indented_subactions(self, action):
         try:
@@ -610,10 +622,14 @@ class HelpFormatter(object):
             self._dedent()
 
     def _split_lines(self, text, width):
+        if isinstance(text, NoWrap):
+            return text.splitlines()
         text = self._whitespace_matcher.sub(' ', text).strip()
         return _textwrap.wrap(text, width)
 
     def _fill_text(self, text, width, indent):
+        if isinstance(text, NoWrap):
+            return ''.join(indent + line for line in text.splitlines(keepends=True))
         text = self._whitespace_matcher.sub(' ', text).strip()
         return _textwrap.fill(text, width, initial_indent=indent,
                                            subsequent_indent=indent)
@@ -818,6 +834,28 @@ class Action(_AttributeHolder):
 
     def __call__(self, parser, namespace, values, option_string=None):
         raise NotImplementedError(_('.__call__() not defined'))
+
+
+class _CallableAction(Action):
+
+    def __init__(self,
+                 option_strings,
+                 dest,
+                 callback,
+                 nargs = 0,
+                 **kwargs):
+        super(_CallableAction, self).__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs=nargs,
+            **kwargs)
+
+        if not callable(callback):
+            raise ValueError('%r is not callable' % (callback,))
+        self.func = callback
+
+    def __call__(self, *args, **kwargs):
+        self.func()
 
 
 class _StoreAction(Action):
@@ -1040,6 +1078,30 @@ class _VersionAction(Action):
         parser.exit(message=formatter.format_help())
 
 
+class _WriteAction(Action): # 9399 addition
+
+    def __init__(self,
+                 option_strings,
+                 message,
+                 file=None,
+                 dest=SUPPRESS,
+                 default=SUPPRESS,
+                 help=None):
+        super(_WriteAction, self).__init__(
+            option_strings=option_strings,
+            dest=dest,
+            default=default,
+            nargs=0,
+            help=help)
+        self.message = message
+        self.file = file
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        file = (self.file if self.file is not None else _sys.stdout)
+        print(self.message, file=self.file) # eric.araujo
+        parser.exit()
+
+
 class _SubParsersAction(Action):
 
     class _ChoicesPseudoAction(Action):
@@ -1233,6 +1295,8 @@ class _ActionsContainer(object):
         self.register('action', 'help', _HelpAction)
         self.register('action', 'version', _VersionAction)
         self.register('action', 'parsers', _SubParsersAction)
+        self.register('action', 'write', _WriteAction)  # 9399 addition
+        self.register('action', 'call', _CallableAction)  # other 9399
 
         # raise an exception if the conflict handler is invalid
         self._get_handler()
