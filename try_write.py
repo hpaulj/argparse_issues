@@ -1,5 +1,5 @@
 import sys
-from argparse import ArgumentParser, SUPPRESS, Action, NoWrap
+from argparse import ArgumentParser, SUPPRESS, Action, Pre
 
 class WriteAction(Action):
 
@@ -76,7 +76,7 @@ modification, are permitted provided that the following conditions are met:
 """
 
 description = '%(prog)s description'
-epilog = NoWrap('Epilog: No wrap line %(prog)s\n\tNext line\n \n')
+epilog = Pre('Epilog: No wrap line %(prog)s\n\tNext line\n \n')
 
 usage = 'This is a usage line with newlines\n\t'
 usage += ' PROG [-h] [-v] [-l] [-m] [-s] [-r] [-i] [-c]'
@@ -92,7 +92,7 @@ parser.add_argument('-l', "--license", action="write", message=bsdlicense,
     help="show %(prog)s license and exit")
 
 grp = parser.add_argument_group(title='Test Group',
-    description=NoWrap('Group for testing\n  the NoWrap indent')
+    description=Pre('Group for testing\n  the Pre indent')
     )
 
 grp.add_argument('-m', '--message', action=WriteAction, message=bsdlicense)
@@ -100,9 +100,9 @@ grp.add_argument('-m', '--message', action=WriteAction, message=bsdlicense)
 grp.add_argument('-s', '--simple', nargs=0, action=SimpleAction, const=bsdlicense)
 
 grp.add_argument('-r', '--repeat', action='count', default=0,
-    help=NoWrap('may repeat option\nto get more detailed information'))
+    help=Pre('may repeat option\nto get more detailed information'))
 
-parser.add_argument('-i','--info', action='version', version=NoWrap(bsdlicense),
+parser.add_argument('-i','--info', action='version', version=Pre(bsdlicense),
     help='writes to stderr, redirect with `2> temp.txt`')
 
 parser.add_argument('-c','--call', action=CallableAction,

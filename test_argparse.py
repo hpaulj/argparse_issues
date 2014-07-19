@@ -3957,24 +3957,24 @@ class TestHelpRawDescription(HelpTestCase):
     version = ''
 
 
-NoWrap = argparse.NoWrap
-class TestHelpNoWrapText(HelpTestCase):
-    """Test the RawTextHelpFormatter"""
+Pre = argparse.Pre
+class TestHelpPreFormattedText(HelpTestCase):
+    """Test the Pre alternative to RawTextHelpFormatter"""
 
     parser_signature = Sig(
-        prog='PROG', #formatter_class=argparse.RawTextHelpFormatter,
-        description=NoWrap('Keep the formatting\n'
+        prog='PROG',
+        description=Pre('Keep the formatting\n'
                     '    exactly as it is written\n'
                     '\n'
                     'here\n'))
 
     argument_signatures = [
-        Sig('--foo', help=NoWrap('    foo help should also\n'
+        Sig('--foo', help=Pre('    foo help should also\n'
                           'appear as given here')),
         Sig('spam', help='spam help'),
     ]
     argument_group_signatures = [
-        (Sig('title', description=NoWrap('    This text\n'
+        (Sig('title', description=Pre('    This text\n'
                                   '  should be indented\n'
                                   '    exactly like it is here\n')),
          [Sig('--bar', help='bar help')]),
@@ -4006,13 +4006,12 @@ class TestHelpNoWrapText(HelpTestCase):
         '''
     version = ''
 
-
-class TestHelpNoWrapDescription(HelpTestCase):
-    """Test the RawTextHelpFormatter"""
+class TestHelpPreFormattedDescription(HelpTestCase):
+    """Test the Pre alternative to RawTextHelpFormatter"""
 
     parser_signature = Sig(
-        prog='PROG', #formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=NoWrap('Keep the formatting\n'
+        prog='PROG',
+        description=Pre('Keep the formatting\n'
                     '    exactly as it is written\n'
                     '\n'
                     'here\n'))
@@ -4023,7 +4022,7 @@ class TestHelpNoWrapDescription(HelpTestCase):
         Sig('spam', help='spam help'),
     ]
     argument_group_signatures = [
-        (Sig('title', description=NoWrap('    This text\n'
+        (Sig('title', description=Pre('    This text\n'
                                   '  should be indented\n'
                                   '    exactly like it is here\n')),
          [Sig('--bar', help='bar help')]),

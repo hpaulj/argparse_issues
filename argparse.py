@@ -80,7 +80,7 @@ __all__ = [
     'REMAINDER',
     'SUPPRESS',
     'ZERO_OR_MORE',
-    'NoWrap',
+    'Pre',
 ]
 
 
@@ -137,15 +137,15 @@ def _ensure_value(namespace, name, value):
         setattr(namespace, name, value)
     return getattr(namespace, name)
 
-class NoWrap(str):
+class Pre(str):
     # wrapper to flag a string that should not be wrapped
     pass
 
-def _no_wrap_format(text, adict):
-    # % format preserving the NoWrap class if needed
-    if isinstance(text, NoWrap):
+def _pre_format(text, adict):
+    # % format preserving the Pre class if needed
+    if isinstance(text, Pre):
         text = text % adict
-        return NoWrap(text)
+        return Pre(text)
     else:
         return text % adict
 
@@ -487,7 +487,7 @@ class HelpFormatter(object):
 
     def _format_text(self, text):
         if '%(prog)' in text:
-            text = _no_wrap_format(text, dict(prog=self._prog))
+            text = _pre_format(text, dict(prog=self._prog))
         text_width = self._width - self._current_indent
         indent = ' ' * self._current_indent
         return self._fill_text(text, text_width, indent) + '\n\n'
@@ -609,7 +609,7 @@ class HelpFormatter(object):
         if params.get('choices') is not None:
             choices_str = ', '.join([str(c) for c in params['choices']])
             params['choices'] = choices_str
-        return _no_wrap_format(self._get_help_string(action), params)
+        return _pre_format(self._get_help_string(action), params)
 
     def _iter_indented_subactions(self, action):
         try:
@@ -622,13 +622,13 @@ class HelpFormatter(object):
             self._dedent()
 
     def _split_lines(self, text, width):
-        if isinstance(text, NoWrap):
+        if isinstance(text, Pre):
             return text.splitlines()
         text = self._whitespace_matcher.sub(' ', text).strip()
         return _textwrap.wrap(text, width)
 
     def _fill_text(self, text, width, indent):
-        if isinstance(text, NoWrap):
+        if isinstance(text, Pre):
             return ''.join(indent + line for line in text.splitlines(keepends=True))
         text = self._whitespace_matcher.sub(' ', text).strip()
         return _textwrap.fill(text, width, initial_indent=indent,
