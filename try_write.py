@@ -1,6 +1,59 @@
-import argparse
 import sys
-NoWrap = argparse.NoWrap
+from argparse import ArgumentParser, SUPPRESS, Action, NoWrap
+
+class WriteAction(Action):
+
+    def __init__(self,
+                 option_strings,
+                 message,
+                 file=None,
+                 dest=SUPPRESS,
+                 default=SUPPRESS,
+                 help='show %(prog)s message'):
+        super(WriteAction, self).__init__(
+            option_strings=option_strings,
+            dest=dest,
+            default=default,
+            nargs=0,
+            help=help)
+        self.message = message
+        self.file = file
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        file = (self.file if self.file is not None else sys.stdout)
+        print(self.message, file=self.file) # eric.araujo
+        # an alternative is to pass message through the formatter
+        # making it just like _VersionAction (except for the file choice)
+        parser.exit()
+
+# simpler action adapted from documentation Foo
+class SimpleAction(Action):
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        print('Custom message for %s: %s'%(parser.prog, self.const))
+        parser.exit()
+
+class CallableAction(Action):
+
+    def __init__(self,
+                 option_strings,
+                 dest,
+                 callback,
+                 nargs = 0,
+                 **kwargs):
+        super(CallableAction, self).__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs=nargs,
+            **kwargs)
+        if not callable(callback):
+            raise ValueError('%r is not callable' % (callback,))
+        self.func = callback
+
+    def __call__(self, *args, **kwargs):
+        # should this insulate func from all the normal arguments?
+        self.func()
+
 
 bsdlicense="""\
 Copyright (c) <year>, <copyright holder>
@@ -22,69 +75,48 @@ modification, are permitted provided that the following conditions are met:
 
 """
 
-# user defined write action
-class WriteAction(argparse.Action):
-
-    def __init__(self,
-                 option_strings,
-                 message,
-                 file=sys.stdout,
-                 dest=argparse.SUPPRESS,
-                 default=argparse.SUPPRESS,
-                 help='show %(prog)s message'):
-        super(WriteAction, self).__init__(
-            option_strings=option_strings,
-            dest=dest,
-            default=default,
-            nargs=0,
-            help=help)
-        self.message = message
-        self.file = file
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        self.file.write(self.message)
-        self.file.write('\n')
-        parser.exit()
-
-# simpler action adapted from documentation Foo
-class SimpleAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        print('Custom message for %s: %s'%(parser.prog, self.const))
-        parser.exit()
-
 description = '%(prog)s description'
 epilog = NoWrap('Epilog: No wrap line %(prog)s\n\tNext line\n \n')
 
 usage = 'This is a usage line with newlines\n\t'
-usage += ' PROG [-h] [-l] [-v] [-m] [-n] [-c]'
+usage += ' PROG [-h] [-v] [-l] [-m] [-s] [-r] [-i] [-c]'
+usage = None
 
-parser = argparse.ArgumentParser(prog='PROG', usage=usage,
+parser = ArgumentParser(prog='PROG', usage=usage,
     description=description, epilog=epilog)
+parser.register('action', 'write', WriteAction)
 
-g = parser.add_argument_group(title='test group',
-    description=NoWrap('This is group\n  testing indent'))
+parser.add_argument('-v', '--version', action='version', version='%(prog)s 0.0.1')
 
-g.add_argument('-l', "--license", action="write", message=bsdlicense,
+parser.add_argument('-l', "--license", action="write", message=bsdlicense,
     help="show %(prog)s license and exit")
 
-g.add_argument('-v', '--version', action='version', version='%(prog)s 0.0.1')
+grp = parser.add_argument_group(title='Test Group',
+    description=NoWrap('Group for testing\n  the NoWrap indent')
+    )
 
-g.add_argument('-m', '--message', action=WriteAction, message=bsdlicense)
+grp.add_argument('-m', '--message', action=WriteAction, message=bsdlicense)
 
-g.add_argument('-n', '--noise', action='count', default=0,
-    help=NoWrap('repeatable counts\n\tsecond help line; default: %(default)s'))
+grp.add_argument('-s', '--simple', nargs=0, action=SimpleAction, const=bsdlicense)
 
-g.add_argument('-s', '--simple', nargs=0, action=SimpleAction, const=bsdlicense)
+grp.add_argument('-r', '--repeat', action='count', default=0,
+    help=NoWrap('may repeat option\nto get more detailed information'))
 
-parser.add_argument('-i','--info', action='version', version=NoWrap(bsdlicense))
-# ../python3 try_write.py -i 2> temp.txt
+parser.add_argument('-i','--info', action='version', version=NoWrap(bsdlicense),
+    help='writes to stderr, redirect with `2> temp.txt`')
 
-parser.add_argument('-c','--call', action='call',
-    callback=lambda: sys.stdout.write(bsdlicense))
+parser.add_argument('-c','--call', action=CallableAction,
+    callback=lambda: sys.stdout.write(bsdlicense),
+    help='option with a simple, no argument, callback')
 
 args = parser.parse_args()
 
-if args.noise:
-    print('%s: message based on a count argument, %s'%(parser.prog, args.noise))
-    if args.noise>2:
+if args.repeat:
+    print('%s: repeat count was %s'%(parser.prog, args.repeat))
+    if args.repeat==2:
+        formatter = parser._get_formatter()
+        formatter.add_text(bsdlicense)
+        wrappedtext = formatter.format_help()
+        parser.exit(wrappedtext)
+    elif args.repeat>2:
         parser.exit(message=bsdlicense)

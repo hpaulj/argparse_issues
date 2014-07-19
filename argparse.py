@@ -836,28 +836,6 @@ class Action(_AttributeHolder):
         raise NotImplementedError(_('.__call__() not defined'))
 
 
-class _CallableAction(Action):
-
-    def __init__(self,
-                 option_strings,
-                 dest,
-                 callback,
-                 nargs = 0,
-                 **kwargs):
-        super(_CallableAction, self).__init__(
-            option_strings=option_strings,
-            dest=dest,
-            nargs=nargs,
-            **kwargs)
-
-        if not callable(callback):
-            raise ValueError('%r is not callable' % (callback,))
-        self.func = callback
-
-    def __call__(self, *args, **kwargs):
-        self.func()
-
-
 class _StoreAction(Action):
 
     def __init__(self,
@@ -1078,30 +1056,6 @@ class _VersionAction(Action):
         parser.exit(message=formatter.format_help())
 
 
-class _WriteAction(Action): # 9399 addition
-
-    def __init__(self,
-                 option_strings,
-                 message,
-                 file=None,
-                 dest=SUPPRESS,
-                 default=SUPPRESS,
-                 help=None):
-        super(_WriteAction, self).__init__(
-            option_strings=option_strings,
-            dest=dest,
-            default=default,
-            nargs=0,
-            help=help)
-        self.message = message
-        self.file = file
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        file = (self.file if self.file is not None else _sys.stdout)
-        print(self.message, file=self.file) # eric.araujo
-        parser.exit()
-
-
 class _SubParsersAction(Action):
 
     class _ChoicesPseudoAction(Action):
@@ -1295,8 +1249,6 @@ class _ActionsContainer(object):
         self.register('action', 'help', _HelpAction)
         self.register('action', 'version', _VersionAction)
         self.register('action', 'parsers', _SubParsersAction)
-        self.register('action', 'write', _WriteAction)  # 9399 addition
-        self.register('action', 'call', _CallableAction)  # other 9399
 
         # raise an exception if the conflict handler is invalid
         self._get_handler()
