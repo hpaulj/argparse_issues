@@ -3957,6 +3957,102 @@ class TestHelpRawDescription(HelpTestCase):
     version = ''
 
 
+Pre = argparse.Pre
+class TestHelpPreFormattedText(HelpTestCase):
+    """Test the Pre alternative to RawTextHelpFormatter"""
+
+    parser_signature = Sig(
+        prog='PROG',
+        description=Pre('Keep the formatting\n'
+                    '    exactly as it is written\n'
+                    '\n'
+                    'here\n'))
+
+    argument_signatures = [
+        Sig('--foo', help=Pre('    foo help should also\n'
+                          'appear as given here')),
+        Sig('spam', help='spam help'),
+    ]
+    argument_group_signatures = [
+        (Sig('title', description=Pre('    This text\n'
+                                  '  should be indented\n'
+                                  '    exactly like it is here\n')),
+         [Sig('--bar', help='bar help')]),
+    ]
+    usage = '''\
+        usage: PROG [-h] [--foo FOO] [--bar BAR] spam
+        '''
+    help = usage + '''\
+
+        Keep the formatting
+            exactly as it is written
+
+        here
+
+        positional arguments:
+          spam        spam help
+
+        optional arguments:
+          -h, --help  show this help message and exit
+          --foo FOO       foo help should also
+                      appear as given here
+
+        title:
+              This text
+            should be indented
+              exactly like it is here
+
+          --bar BAR   bar help
+        '''
+    version = ''
+
+class TestHelpPreFormattedDescription(HelpTestCase):
+    """Test the Pre alternative to RawTextHelpFormatter"""
+
+    parser_signature = Sig(
+        prog='PROG',
+        description=Pre('Keep the formatting\n'
+                    '    exactly as it is written\n'
+                    '\n'
+                    'here\n'))
+
+    argument_signatures = [
+        Sig('--foo', help='  foo help should not\n'
+                          '    retain this odd formatting'),
+        Sig('spam', help='spam help'),
+    ]
+    argument_group_signatures = [
+        (Sig('title', description=Pre('    This text\n'
+                                  '  should be indented\n'
+                                  '    exactly like it is here\n')),
+         [Sig('--bar', help='bar help')]),
+    ]
+    usage = '''\
+        usage: PROG [-h] [--foo FOO] [--bar BAR] spam
+        '''
+    help = usage + '''\
+
+        Keep the formatting
+            exactly as it is written
+
+        here
+
+        positional arguments:
+          spam        spam help
+
+        optional arguments:
+          -h, --help  show this help message and exit
+          --foo FOO   foo help should not retain this odd formatting
+
+        title:
+              This text
+            should be indented
+              exactly like it is here
+
+          --bar BAR   bar help
+        '''
+    version = ''
+
 class TestHelpArgumentDefaults(HelpTestCase):
     """Test the ArgumentDefaultsHelpFormatter"""
 
