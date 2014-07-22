@@ -80,7 +80,12 @@ __all__ = [
     'REMAINDER',
     'SUPPRESS',
     'ZERO_OR_MORE',
+    'Normal',
     'Pre',
+    'NoWrap',
+    'PreWrap',
+    'PreLine',
+    'Py3FormatHelpFormatter',
 ]
 
 
@@ -137,17 +142,127 @@ def _ensure_value(namespace, name, value):
         setattr(namespace, name, value)
     return getattr(namespace, name)
 
-class Pre(str):
-    # wrapper to flag a string that should not be wrapped
-    pass
 
-def _pre_format(text, adict):
-    # % format preserving the Pre class if needed
-    if isinstance(text, Pre):
-        text = text % adict
-        return Pre(text)
-    else:
-        return text % adict
+# =============================
+# CSS white-space like formmating
+# =============================
+
+class _WhitespaceStyle(str):
+    """ parent for classes that implement wrapping (or not) in the style
+    of CSS white-space:
+    """
+    def copy_class(self, text):
+        """preserve self's class in the returned text (or list of lines)
+        class information like this is readily lost in str operations like join
+        """
+        Fn = type(self)
+        if isinstance(text, str):
+            return Fn(text)
+        else:
+            # this may not be of any value since a list like this normally joined
+            return [Fn(line) for line in text]
+
+    def _str_format(self, adict):
+        # apply % formatting
+        text = self % adict
+        return self.copy_class(text)
+
+    def format(self, *args, **kwargs):
+        # apply Py3 style format()
+        text = super(_WhitespaceStyle,self).format(*args, **kwargs)
+        return self.copy_class(text)
+
+
+class Normal(_WhitespaceStyle):
+    """Sequences of whitespace are collapsed. Newline characters in the
+    source are handled as other whitespace. Breaks lines as necessary to fill line boxes.
+    Acts same as the default base str class; convenience class
+    """
+    _whitespace_matcher = _re.compile(r'\s+')
+    def _split_lines(self, width):
+        text = self
+        text = self._whitespace_matcher.sub(' ', text).strip()
+        lines = _textwrap.wrap(text, width)
+        return self.copy_class(lines)
+
+    def _fill_text(self, width, indent):
+        text = self
+        text = self._whitespace_matcher.sub(' ', text).strip()
+        text = _textwrap.fill(text, width, initial_indent=indent,
+                                           subsequent_indent=indent)
+        return self.copy_class(text)
+
+class Pre(_WhitespaceStyle):
+    """Sequences of whitespace are preserved, lines are only broken
+    at newline characters in the source and at <br> elements.
+    Acts same as the Raw...HelpFormatter classes
+    """
+    def _split_lines(self, width):
+        return self.copy_class(self.splitlines())
+
+    def _fill_text(self, width, indent):
+        text = ''.join(indent + line for line in self.splitlines(keepends=True))
+        return self.copy_class(text)
+
+class NoWrap(_WhitespaceStyle):
+    """Collapses whitespace as for normal, but suppresses line breaks
+    (text wrapping) within text.
+    """
+    _whitespace_matcher = _re.compile(r'[ \t\r\f\v]+') # whitespace excelude \n
+    def _split_lines(self, width):
+        text = self
+        text = self._whitespace_matcher.sub(' ', text).strip()
+        return self.copy_class(text.splitlines())
+
+    def _fill_text(self, width, indent):
+        text = self
+        text = self._whitespace_matcher.sub(' ', text).strip()
+        text = ''.join(indent + line for line in text.splitlines(keepends=True))
+        return self.copy_class(text)
+
+class PreWrap(_WhitespaceStyle):
+    """Sequences of whitespace are preserved. Lines are broken at newline characters,
+    at <br>, and as necessary to fill line boxes."""
+    def _split_lines(self, width):
+        text = self.splitlines()
+        lines = []
+        for line in text:
+            lines.extend(_textwrap.wrap(line, width))
+        return self.copy_class(lines)
+
+    def _fill_text(self, width, indent):
+        text = self.splitlines()
+        lines = []
+        for line in text:
+            newline = _textwrap.fill(line, width, initial_indent=indent,
+                                           subsequent_indent=indent)
+            lines.append(newline)
+        text = "\n".join(lines)
+        return self.copy_class(text)
+
+class PreLine(_WhitespaceStyle):
+    """Sequences of whitespace are collapsed. Lines are broken at newline
+    characters, at <br>, and as necessary to fill line boxes."""
+    _whitespace_matcher = _re.compile(r'[ \t\r\f\v]+') # whitespace excelude \n
+    def _split_lines(self, width):
+        text = self._whitespace_matcher.sub(' ', self).strip()
+        text = text.splitlines()
+        lines = []
+        for line in text:
+            lines.extend(_textwrap.wrap(line, width))
+        return self.copy_class(lines)
+
+    def _fill_text(self, width, indent):
+        text = self._whitespace_matcher.sub(' ', self).strip()
+        text = text.splitlines()
+        lines = []
+        for line in text:
+            newline = _textwrap.fill(line, width, initial_indent=indent,
+                                           subsequent_indent=indent)
+            lines.append(newline)
+        text = "\n".join(lines)
+        return self.copy_class(text)
+
 
 # ===============
 # Formatting Help
@@ -302,7 +417,7 @@ class HelpFormatter(object):
 
         # if usage is specified, use that
         if usage is not None:
-            usage = usage % dict(prog=self._prog)
+            usage = self._str_format(usage, dict(prog=self._prog))
 
         # if no optionals or positionals are available, usage is just prog
         elif usage is None and not actions:
@@ -487,7 +602,7 @@ class HelpFormatter(object):
 
     def _format_text(self, text):
         if '%(prog)' in text:
-            text = _pre_format(text, dict(prog=self._prog))
+            text = self._str_format(text, dict(prog=self._prog))
         text_width = self._width - self._current_indent
         indent = ' ' * self._current_indent
         return self._fill_text(text, text_width, indent) + '\n\n'
@@ -609,7 +724,7 @@ class HelpFormatter(object):
         if params.get('choices') is not None:
             choices_str = ', '.join([str(c) for c in params['choices']])
             params['choices'] = choices_str
-        return _pre_format(self._get_help_string(action), params)
+        return self._str_format(self._get_help_string(action), params)
 
     def _iter_indented_subactions(self, action):
         try:
@@ -622,17 +737,30 @@ class HelpFormatter(object):
             self._dedent()
 
     def _split_lines(self, text, width):
-        if isinstance(text, Pre):
-            return text.splitlines()
-        text = self._whitespace_matcher.sub(' ', text).strip()
-        return _textwrap.wrap(text, width)
+        try:
+            return text._split_lines(width)
+        except AttributeError:
+            return Normal(text)._split_lines(width)
 
     def _fill_text(self, text, width, indent):
-        if isinstance(text, Pre):
-            return ''.join(indent + line for line in text.splitlines(keepends=True))
-        text = self._whitespace_matcher.sub(' ', text).strip()
-        return _textwrap.fill(text, width, initial_indent=indent,
-                                           subsequent_indent=indent)
+        try:
+            return text._fill_text(width, indent)
+        except AttributeError:
+            return Normal(text)._fill_text(width, indent)
+
+    def _str_format(self, text, adict):
+        # apply % formatting
+        if isinstance(text, _WhitespaceStyle):
+            return text._str_format(adict)
+        else:
+            return text % adict
+
+    def _str_format(self, text, adict):
+        # apply % formatting; alt logic
+        try:
+            return text._str_format(adict)
+        except AttributeError:
+            return Normal(text)._str_format(adict)
 
     def _get_help_string(self, action):
         return action.help
@@ -698,6 +826,26 @@ class MetavarTypeHelpFormatter(HelpFormatter):
         return action.type.__name__
 
 
+
+class Py3FormatHelpFormatter(HelpFormatter):
+    """Help message formatter which accepts the Py3 string format function.
+
+    Only the name of this class is considered a public API. All the methods
+    provided by the class are considered an implementation detail.
+    """
+
+    def _str_format(self, text, adict):
+        # handle both % and format styles
+        if '%(' in text:
+            return super(Py3FormatHelpFormatter, self)._str_format(text, adict)
+        else:
+            try:
+                # protect against % style text that may have a string
+                # that looks like a new style (e.g. {test})
+                return text.format(**adict)
+            except KeyError:
+                pass
+            return text
 
 # =====================
 # Options and Arguments
