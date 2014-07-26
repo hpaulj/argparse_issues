@@ -1544,6 +1544,9 @@ class _ArgumentGroup(_ActionsContainer):
         super(_ArgumentGroup, self)._remove_action(action)
         self._group_actions.remove(action)
 
+    def add_argument_group(self, *args, **kwargs):
+        raise ValueError('Cannot nest groups')
+
 
 class _MutuallyExclusiveGroup(_ArgumentGroup):
 
@@ -1563,6 +1566,9 @@ class _MutuallyExclusiveGroup(_ArgumentGroup):
     def _remove_action(self, action):
         self._container._remove_action(action)
         self._group_actions.remove(action)
+
+    def add_mutually_exclusive_group(self, **kwargs):
+        raise ValueError('Cannot nest mutually exclusive groups')
 
 
 class ArgumentParser(_AttributeHolder, _ActionsContainer):
