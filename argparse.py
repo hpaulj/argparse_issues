@@ -80,11 +80,13 @@ __all__ = [
     'REMAINDER',
     'SUPPRESS',
     'ZERO_OR_MORE',
+    'WhitespaceStyle',
     'Normal',
     'Pre',
     'NoWrap',
     'PreWrap',
     'PreLine',
+    'WSList',
     'Py3FormatHelpFormatter',
 ]
 
@@ -147,10 +149,13 @@ def _ensure_value(namespace, name, value):
 # CSS white-space like formmating
 # =============================
 
-class _WhitespaceStyle(str):
+class WhitespaceStyle(str):
     """ parent for classes that implement wrapping (or not) in the style
     of CSS white-space:
     """
+    def dedent(self):
+        return self.copy_class(_textwrap.dedent(self))
+
     def copy_class(self, text):
         """preserve self's class in the returned text (or list of lines)
         class information like this is readily lost in str operations like join
@@ -169,11 +174,68 @@ class _WhitespaceStyle(str):
 
     def format(self, *args, **kwargs):
         # apply Py3 style format()
-        text = super(_WhitespaceStyle,self).format(*args, **kwargs)
+        text = super(WhitespaceStyle,self).format(*args, **kwargs)
         return self.copy_class(text)
 
+    def block(self, keepblank=False):
+        # divide text in paragraphs - block of text lines returned
+        # as one line, defined by blank line
+        # adapted from issue12806 paragraphFormatter
+        # no special handling for indented lines
+        # may keep a blank line (' ') between blocks
+        text = self
 
-class Normal(_WhitespaceStyle):
+        def blocker (text):
+            block = []
+            for line in text.splitlines():
+                isblank = _re.match(r'\s*$', line)
+                if isblank:
+                    if block:
+                        yield ' '.join(block)
+                        block = []
+                    if keepblank:
+                        yield ' '
+                else:
+                    block.append(line)
+            if block:
+                yield (' '.join(block))
+
+        lines = list(blocker(text))
+        lines = '\n'.join(lines)
+        return self.copy_class(lines)
+
+
+class WSList(list):
+    # a list of WhitespaceStyle objects
+    # meant to be called like a WhitespaceStyle object, applying the
+    # method to each of its items
+    # may need to extend to handle str in Normal()
+    # e.g. iterator that converts str to Normal
+
+    def __contains__(self, key):
+        # e.g. for '%' in self
+        return any(l.__contains__(key) for l in self)
+
+    def _split_lines(self, width):
+        lines = []
+        for p in self:
+            lines.extend(p._split_lines(width))
+        return WSList(lines)
+
+    def _fill_text(self, width, indent):
+        lines = []
+        for p in self:
+            lines.append(p._fill_text(width, indent))
+        return '\n'.join(lines)
+
+    def _str_format(self, adict):
+        return WSList([x._str_format(adict) for x in self])
+
+    def format(self, *args, **kwargs):
+        return WSList([x.format(*args, **kwargs) for x in self])
+
+
+class Normal(WhitespaceStyle):
     """Sequences of whitespace are collapsed. Newline characters in the
     source are handled as other whitespace. Breaks lines as necessary to fill line boxes.
     Acts same as the default base str class; convenience class
@@ -192,7 +254,7 @@ class Normal(_WhitespaceStyle):
                                            subsequent_indent=indent)
         return self.copy_class(text)
 
-class Pre(_WhitespaceStyle):
+class Pre(WhitespaceStyle):
     """Sequences of whitespace are preserved, lines are only broken
     at newline characters in the source and at <br> elements.
     Acts same as the Raw...HelpFormatter classes
@@ -204,25 +266,30 @@ class Pre(_WhitespaceStyle):
         text = ''.join(indent + line for line in self.splitlines(keepends=True))
         return self.copy_class(text)
 
-class NoWrap(_WhitespaceStyle):
+class NoWrap(WhitespaceStyle):
     """Collapses whitespace as for normal, but suppresses line breaks
     (text wrapping) within text.
     """
     _whitespace_matcher = _re.compile(r'[ \t\r\f\v]+') # whitespace excelude \n
     def _split_lines(self, width):
-        text = self
-        text = self._whitespace_matcher.sub(' ', text).strip()
-        return self.copy_class(text.splitlines())
+        text = self.strip().splitlines()
+        lines = []
+        for line in text:
+            line = self._whitespace_matcher.sub(' ', line).strip()
+            lines.append(line)
+        return self.copy_class(lines)
 
     def _fill_text(self, width, indent):
-        text = self
-        text = self._whitespace_matcher.sub(' ', text).strip()
-        text = ''.join(indent + line for line in text.splitlines(keepends=True))
-        return self.copy_class(text)
+        text = self.strip().splitlines()
+        lines = []
+        for line in text:
+            line = self._whitespace_matcher.sub(' ', line).strip()
+            lines.append(indent + line)
+        return self.copy_class('\n'.join(lines))
 
-class PreWrap(_WhitespaceStyle):
+class PreWrap(WhitespaceStyle):
     """Sequences of whitespace are preserved. Lines are broken at newline characters,
-    at <br>, and as necessary to fill line boxes."""
+    and as necessary to fill line boxes."""
     def _split_lines(self, width):
         text = self.splitlines()
         lines = []
@@ -240,25 +307,27 @@ class PreWrap(_WhitespaceStyle):
         text = "\n".join(lines)
         return self.copy_class(text)
 
-class PreLine(_WhitespaceStyle):
+class PreLine(WhitespaceStyle):
     """Sequences of whitespace are collapsed. Lines are broken at newline
-    characters, at <br>, and as necessary to fill line boxes."""
+    characters, and as necessary to fill line boxes."""
     _whitespace_matcher = _re.compile(r'[ \t\r\f\v]+') # whitespace excelude \n
     def _split_lines(self, width):
-        text = self._whitespace_matcher.sub(' ', self).strip()
-        text = text.splitlines()
+        text = self.splitlines()
         lines = []
         for line in text:
+            line = self._whitespace_matcher.sub(' ', line).strip()
             lines.extend(_textwrap.wrap(line, width))
         return self.copy_class(lines)
 
-    def _fill_text(self, width, indent):
-        text = self._whitespace_matcher.sub(' ', self).strip()
-        text = text.splitlines()
+    def _fill_text(self, width, indent, subsequent_indent=None):
+        if subsequent_indent is None:
+            subsequent_indent = indent
+        text = self.splitlines()
         lines = []
         for line in text:
+            line = self._whitespace_matcher.sub(' ', line).strip()
             newline = _textwrap.fill(line, width, initial_indent=indent,
-                                           subsequent_indent=indent)
+                                           subsequent_indent=subsequent_indent)
             lines.append(newline)
         text = "\n".join(lines)
         return self.copy_class(text)
@@ -601,8 +670,10 @@ class HelpFormatter(object):
         return text
 
     def _format_text(self, text):
-        if '%(prog)' in text:
-            text = self._str_format(text, dict(prog=self._prog))
+        #if '%(prog)' in text:
+        #    text = self._str_format(text, dict(prog=self._prog))
+        # doesn't need to be conditional, does it?
+        text = self._str_format(text, dict(prog=self._prog))
         text_width = self._width - self._current_indent
         indent = ' ' * self._current_indent
         return self._fill_text(text, text_width, indent) + '\n\n'
@@ -750,7 +821,7 @@ class HelpFormatter(object):
 
     def _str_format(self, text, adict):
         # apply % formatting
-        if isinstance(text, _WhitespaceStyle):
+        if isinstance(text, [WhitespaceStyle, WSList]):
             return text._str_format(adict)
         else:
             return text % adict
