@@ -1867,6 +1867,112 @@ Exiting methods
 
 .. _upgrading-optparse-code:
 
+
+WhitespaceStyle
+^^^^^^^^^^^^^^^
+
+An alternative to changing the formatter_class_ is to
+create a text block as :class:`str` subclass which implements the
+desired formatting behavior (wrapping and whitespace compression).
+This is akin to marking HTML text with a `<pre>` tag, or the
+CSS white-space: option.
+
+Currently there are five classes, corresponding to the CSS options.
+
+.. class:: Normal
+           Pre
+           NoWrap
+           PreLine
+           PreWrap
+
+:class:`Normal` implements the default wrapping behavior,
+as performed by the :class:`HelpFormatter`, including white-space
+compression.
+
+:class:`Pre` is used for preformatted text, preserving all white space
+and new lines.  If both the description_ and epilog_ texts are of type
+:class:`Pre`, the help_ display will be same as that produced by the
+:class:`RawDescriptionHelpFormatter`.  If the argument help_ text is also
+of type :class:`Pre` the display will match that produced by
+:class:`RawTextHelpFormatter`.
+
+For convenience ``textwrap.dedent()`` is available as a method for each of
+these Style classes::
+
+   >>> parser = argparse.ArgumentParser(
+   ...     prog='PROG',
+   ...     description=argparse.Pre('''\
+   ...         Please do not mess up this text!
+   ...         --------------------------------
+   ...             I have indented it
+   ...             exactly the way
+   ...             I want it
+   ...         ''').dedent())
+   >>> parser.print_help()
+   usage: PROG [-h]
+
+   Please do not mess up this text!
+   --------------------------------
+      I have indented it
+      exactly the way
+      I want it
+
+   optional arguments:
+    -h, --help  show this help message and exit
+
+
+With these classes it is possible to mix the formatting style of the
+different parts of the help_ text.  For example, the description_ could be
+a :class:`PreLine`, with multiple individually wrapped paragraphs.
+The epilog_ could be :class:`Pre` with examples, while the help_ text
+could be left unmarked (or of :class:`Normal`)::
+
+
+   >>> parser = argparse.ArgumentParser(
+   ...     prog='PROG',
+   ...     description=argparse.PreLine('''\
+   ...         This is a description composed of several paragraphs that are wrapped individually.
+   ...
+   ...         %(prog)s arguments are as follows.
+   ...         ''').dedent(),
+   ...     epilog=argparse.Pre('''\
+   ...         %(prog)s example:
+   ...           %(prog)s --other 1
+   ...         ''').dedent())
+   >>> parser.add_argument('--text', help='a normal help line')
+   >>> parser.add_argument('--other', default='test',
+   ...     help=argparse.Pre("help line with hanging\n\t(default:%(default)r)"))
+   >>> parser.print_help()
+   usage: PROG [-h] [--text TEXT] [--other OTHER]
+
+   This is a description composed of several paragraphs that are wrapped
+   individually.
+
+   PROG arguments are as follows.
+
+   optional arguments:
+     -h, --help     show this help message and exit
+     --text TEXT    a normal help line
+     --other OTHER  help line with hanging
+                           (default:'test')
+
+   PROG example:
+     PROG --other 1
+
+
+
+
+.. class:: WhitespaceStyle
+           WSList
+
+:class:`WhitespaceStyle` is the parent class for these Style classes,
+which may be used to define custom formatting actions.  :class:`WSList` is a subclass of :class:`list`, with strings and Style
+class strings.  It may be used to compose a text that uses several types
+of formatting.
+
+For now these Style classes only work with the default :class:`HelpFormatter`.
+
+
 Upgrading optparse code
 -----------------------
 
