@@ -11,13 +11,8 @@ Hanging = preformat.Hanging
 preformat = preformat.preformat
 from functools import partial
 Hanging = partial(Hanging, header_indent=6)
-Hanging6 = Hanging
-print(Hanging)
-print(Hanging('text').header_indent)
 
 if __name__ == '__main__':
-
-
 
     parser = argparse.ArgumentParser(prog='PROG',
                                      description=preformat('''\
@@ -40,7 +35,7 @@ if __name__ == '__main__':
         fit the target window size so that your text remains flexible.
 
             1. But lines such as
-            2) this that that are indented beyond the first line's indent,
+            2) this that are indented beyond the first line's indent,
             - are reproduced verbatim, with no wrapping or other formatting applied.
 
         The ParagraphFormatterML class will treat consecutive lines of
@@ -48,14 +43,12 @@ if __name__ == '__main__':
         with backslashes to create a single long logical line.
 
         As with docstrings, the leading space to the text block is ignored.''',
-        indent_style=Hanging6))
+        indent_style=Hanging))
 
     parser.print_help()
 
 """
-why blank line between paragraphs in description
-but not in help?
-fill_lines used with description
+ description
 split_lines with help
 
 ''.splitlines() => []

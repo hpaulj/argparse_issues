@@ -77,7 +77,7 @@ class Hanging(WhitespaceStyle):
     intended to format list items.  Ideally the indent accounts for
     header, e.g. '1. ', '- '.
     Indent may also be given as a initial parameter
-    (preserving this indent during operations is tricky)
+    Extra code here to preserve that Indent across functions
     """
 
     def __new__(cls, data='', header_indent=None):
@@ -101,15 +101,34 @@ class Hanging(WhitespaceStyle):
             return ' '* self.header_indent
 
     def copy_class(self, text):
-        text = super(Hanging, self).copy_class(text)
-        text.header_indent = self.header_indent
-        return text
+        """modified to handle the extra attribute
+        """
+        Fn = type(self)
+        if isinstance(text, str):
+            return Fn(text, header_indent=self.header_indent)
+        else:
+            # this may not be of any value since a list like this normally joined
+            return WSList([Fn(line, self.header_indent) for line in text])
+
+    def __getattribute__(self, name):
+        """modified to handle the extra attribute
+        """
+        att = super(WhitespaceStyle, self).__getattribute__(name)
+
+        if not callable(att):
+            return att
+
+        def wrapped_fn(*args, **kwargs):
+            value = att(*args, **kwargs)
+            if isinstance(value, str):
+                return type(self)(value, self.header_indent)
+            return value
+        return wrapped_fn
 
     def _split_lines(self, width):
         text = self._fill_text(width, '')
         lines = text.splitlines()
-        return lines #self.copy_class(lines)
-        # copy_class does not work right for list of lines
+        return self.copy_class(lines)
 
     def _fill_text(self, width, indent):
         text = self
@@ -120,3 +139,25 @@ class Hanging(WhitespaceStyle):
         text = textwrap.fill(text, width, initial_indent=indent,
                                            subsequent_indent=indent+added_indent)
         return self.copy_class(text)
+
+if __name__ == "__main__":
+    text = Hanging('1- one two three four {five} %(six)s seven')
+    print(text)
+    print(text._fill_text(20,''))
+    text = text.format(five=5)._str_format(dict(six=6))
+    print(text._fill_text(20,''))
+
+    print('\n')
+    N = 6
+    text = Hanging('1- One two three four {five} %(six)s seven', N)
+    print(text)
+    assert text.header_indent == N
+    print(text._fill_text(20,''))
+    assert text.header_indent == N
+    #print(text.upper().header_indent)
+    text1 = text.copy_class(str(text))
+    print('after copy', text1.header_indent, type(text1))
+    print(text1)
+    text = text.format(five=5)._str_format(dict(six=6))
+    print(text.header_indent)
+    print(text._fill_text(20,''))

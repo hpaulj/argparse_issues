@@ -165,17 +165,17 @@ class WhitespaceStyle(str):
             return Fn(text)
         else:
             # this may not be of any value since a list like this normally joined
-            return [Fn(line) for line in text]
+            return WSList([Fn(line) for line in text])
 
     def _str_format(self, adict):
         # apply % formatting
         text = self % adict
         return self.copy_class(text)
 
-    def format(self, *args, **kwargs):
-        # apply Py3 style format()
-        text = super(WhitespaceStyle,self).format(*args, **kwargs)
-        return self.copy_class(text)
+    #def format(self, *args, **kwargs):
+    #    # apply Py3 style format()
+    #    text = super(WhitespaceStyle,self).format(*args, **kwargs)
+    #    return self.copy_class(text)
 
     def block(self, keepblank=False):
         # divide text in paragraphs - block of text lines returned
@@ -204,6 +204,22 @@ class WhitespaceStyle(str):
         lines = '\n'.join(lines)
         return self.copy_class(lines)
 
+    def __getattribute__(self, name):
+        att = super(WhitespaceStyle, self).__getattribute__(name)
+
+        if not callable(att):
+            return att
+
+        if att.__name__=='copy_class':
+            return att
+
+        def wrapped_fn(*args, **kwargs):
+            value = att(*args, **kwargs)
+            if isinstance(value, str):
+                return type(self)(value)
+            return value
+        return wrapped_fn
+
 
 class WSList(list):
     # a list of WhitespaceStyle objects
@@ -226,7 +242,7 @@ class WSList(list):
         lines = []
         for p in self:
             lines.append(p._fill_text(width, indent))
-        return '\n'.join(lines)
+        return Pre('\n'.join(lines))
 
     def _str_format(self, adict):
         return WSList([x._str_format(adict) for x in self])
