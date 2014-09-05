@@ -18,7 +18,7 @@ def foo0():
     g2.add_argument('-b')
     return p
 
-def foo1():
+def foo1x():
     # test for each of the allowed combinations
     print('4 ands')
     p = argparse.ArgumentParser(formatter_class=argparse.UsageGroupHelpFormatter)

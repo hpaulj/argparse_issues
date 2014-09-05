@@ -9,7 +9,7 @@ g2 = p.add_usage_group(kind='or', dest='g2')
 g2.add_argument('--a2', action='store_false')
 g2.add_usage_group(g1)
 
-g3 = argparse.UsageGroup(p, kind='or', dest='g3')
+g3 = argparse._OrUsageGroup(p, kind='or', dest='g3')
 g3.add_argument('--a3')
 g1.add_argument_group(g3)
 # a predefined group can be nested
@@ -17,7 +17,7 @@ g1.add_argument_group(g3)
 g4 = g1.add_usage_group(kind='and', dest='g4')
 g4.add_argument('--a4')
 
-class MyGroup(argparse._NotUsageGroup):
+class MyGroup(argparse._NorUsageGroup):
     pass
 g5 = g4.add_usage_group(kind=MyGroup)
 g5.add_argument('--a5')

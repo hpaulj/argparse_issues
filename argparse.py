@@ -1908,14 +1908,15 @@ class UsageGroup(_AttributeHolder, _ArgumentGroup):
     def create(container, **kwargs):
         if container._registries.get('usage',None) is None:
             # initialize the registry (if needed)
-            container.register('usage', 'xor', _XorUsageGroup)
-            container.register('usage', 'mxg', _XorUsageGroup)
-            container.register('usage', 'and', _AndUsageGroup)
-            container.register('usage', 'all', _AndUsageGroup)
-            container.register('usage', 'inc', _AndUsageGroup)
-            container.register('usage', 'or', _OrUsageGroup)
-            container.register('usage', 'any', _OrUsageGroup)
-            container.register('usage', 'not', _NotUsageGroup)
+            container.register('usage', 'xor',  _XorUsageGroup)
+            container.register('usage', 'mxg',  _XorUsageGroup)
+            container.register('usage', 'and',  _AndUsageGroup)
+            container.register('usage', 'all',  _AndUsageGroup)
+            container.register('usage', 'inc',  _AndUsageGroup)
+            container.register('usage', 'or',   _OrUsageGroup)
+            container.register('usage', 'any',  _OrUsageGroup)
+            container.register('usage', 'not',  _NorUsageGroup)
+            container.register('usage', 'nor',  _NorUsageGroup)
             container.register('usage', 'nand', _NandUsageGroup)
         kind = kwargs['kind']
         kind = container._registry_get('usage', kind, kind)
@@ -1942,6 +1943,7 @@ class UsageGroup(_AttributeHolder, _ArgumentGroup):
             self.parser = container # place to put Actions
         else:
             self.parser = getattr(container, 'parser', container)
+            # container could be a parser, argument_group, usage_group
 
         self._add_test()
         # potentially might define Action like attributes to help format it
@@ -1983,22 +1985,27 @@ class UsageGroup(_AttributeHolder, _ArgumentGroup):
         # (and potentially other attributes)
         # some alternatives only differ in the choice of 'joiner'
         if self.testfn is None:
-            if self.kind in ['mxg', 'mx', 'ecl', 'excl', 'exclusive']:
-                joiner, parens, testfn = self.test_mx_group()
-            elif self.kind in ['xor']:
-                joiner, parens, testfn = self.test_mx_group()
-                joiner = ' ^ '
-                # ^ is the bitwise xor; but | is the legacy mxg joiner
-            elif self.kind in ['inc', 'inclusive', 'all']:
-                joiner, parens, testfn = self.test_inc_group()
-            elif self.kind in ['or']:
-                joiner, parens, testfn = self.test_any_group()
-            elif self.kind in ['any']:
-                joiner, parens, testfn = self.test_any_group()
-                joiner = ' , '
-            elif self.kind in ['not']:
-                joiner, parens, testfn = self.test_not_group()
+            if False:
+                pass
+                """
+                if self.kind in ['mxg', 'mx', 'ecl', 'excl', 'exclusive']:
+                    joiner, parens, testfn = self.test_mx_group()
+                elif self.kind in ['xor']:
+                    joiner, parens, testfn = self.test_mx_group()
+                    joiner = ' ^ '
+                    # ^ is the bitwise xor; but | is the legacy mxg joiner
+                elif self.kind in ['inc', 'inclusive', 'all']:
+                    joiner, parens, testfn = self.test_inc_group()
+                elif self.kind in ['or']:
+                    joiner, parens, testfn = self.test_any_group()
+                elif self.kind in ['any']:
+                    joiner, parens, testfn = self.test_any_group()
+                    joiner = ' , '
+                elif self.kind in ['not']:
+                    joiner, parens, testfn = self.test_not_group()
+                """
             else:
+                self.raise_error('Unknown group kind')
                 joiner, parens, testfn = self.test_this_group()
         else:
             joiner, parens = ',','()'
@@ -2048,16 +2055,26 @@ class UsageGroup(_AttributeHolder, _ArgumentGroup):
         else:
             return super(UsageGroup, self).add_argument(*args, **kwargs)
 
-    def raise_error(self, parser, msg):
+    def arg_list(self):
+        # list arguments suitable for error messages
+        # similar to list produced by mutually_exclusive_group testing
+        # maybe UsageGroup should have a .help?
+        def name(a):
+            if isinstance(a, UsageGroup):
+                return a.dest
+            if a.help is not SUPPRESS:
+                return _get_action_name(a)
+            return None
+        return [name(action) for action in self._group_actions if name(action) is not None]
+        """
+        names = [_get_action_name(action) for action in group._group_actions
+                    if action.help is not SUPPRESS]
+        """
+
+    def raise_error(self, msg):
         # common method of testfn
-        names = [action.dest for action in self._group_actions]
-        names = ', '.join(names)
-        msg = msg % names
-        """
-        if self.dest:
-            msg = '%s: %s'%(self.dest, msg)
-        parser.error(msg)
-        """
+        names = ', '.join(self.arg_list())
+        msg = msg %dict(dest=names)
         self.log('ERROR: %s'%msg)
         raise GroupError(self, msg)
 
@@ -2073,12 +2090,15 @@ class UsageGroup(_AttributeHolder, _ArgumentGroup):
         okgroups = []
         errors = []
         for a in groups:
+            result = self.eval_nested_test(a.testfn, errors, parser, seen_actions, *vargs, **kwargs)
+            """
             try:
                 result = a.testfn(parser, seen_actions, *vargs, **kwargs)
             except GroupError as e:
                 err = _sys.exc_info()[1]
                 errors.append(str(err))
                 result = False
+            """
             if result:
                 okgroups.append(a)
         okgroups = set(okgroups)
@@ -2090,7 +2110,8 @@ class UsageGroup(_AttributeHolder, _ArgumentGroup):
         # possibly
         # if cnt==0:
         #     self.raise_error with errors list
-        return cnt
+        result = True
+        return cnt, result, errors
 
     def test_this_group(self):
         def testfn(parser, seen_actions, *vargs, **kwargs):
@@ -2098,9 +2119,10 @@ class UsageGroup(_AttributeHolder, _ArgumentGroup):
             group_actions = self._group_actions
             group_seen = set(seen_actions).intersection(group_actions)
             cnt = len(group_seen)
-            self.log('nested testing %s'%[a.dest for a in group_actions])
+            self.log('nested testing %s'%self.arg_list())
         return ', ', '()', testfn
 
+    """
     def test_mx_group(self):
         joiner = ' | ' # something better for xor?
         parens = '()' if self.required else '[]'
@@ -2115,7 +2137,7 @@ class UsageGroup(_AttributeHolder, _ArgumentGroup):
             else:
                 msg = None
             if msg:
-                self.raise_error(parser, msg)
+                self.raise_error(msg)
             return cnt>0 # True if something present, False if none
         return joiner, parens, testfn
 
@@ -2131,7 +2153,7 @@ class UsageGroup(_AttributeHolder, _ArgumentGroup):
             else:
                 msg = None
             if msg:
-                self.raise_error(parser, msg)
+                self.raise_error(msg)
             self.log('inc testing %s %s'%(cnt, [a.dest for a in self._group_actions]))
             return cnt>0
         return ' & ', '()', testfn
@@ -2145,7 +2167,7 @@ class UsageGroup(_AttributeHolder, _ArgumentGroup):
             else:
                 msg = None
             if msg:
-                self.raise_error(parser, msg)
+                self.raise_error(msg)
             self.log('any testing %s'%([a.dest for a in self._group_actions]))
             return cnt>0
         return ' | ', '{}', testfn
@@ -2162,9 +2184,10 @@ class UsageGroup(_AttributeHolder, _ArgumentGroup):
             else:
                 msg = None
             if msg:
-                self.raise_error(parser, msg)
+                self.raise_error(msg)
             return cnt==0
         return joiner, parens, testfn
+    """
 
     def __call__(self, *args, **kwargs):
         # calling this object runs its test function
@@ -2214,78 +2237,66 @@ class UsageGroup(_AttributeHolder, _ArgumentGroup):
         # accumulating errors from nested tests is undecided
         # when should they be ignored, collected, or allowed to percolate up?
         try:
-            result1 = testfn(parser, seen_actions, *vargs, **kwargs)
+            result = testfn(parser, seen_actions, *vargs, **kwargs)
         except GroupError as e:
             err = _sys.exc_info()[1]
             errors.append(str(err))
-            result1 = False
-        return result1
+            result = False
+        return result
 
 class _XorUsageGroup(UsageGroup):
     """xor/mutually_exclusive etc """
     # start True, cnt=0; if found +=1; if cnt>1 error
     # if required and cnt==0; error
+    def count_actions1(self, parser, seen_actions, *vargs, **kwargs):
+        # shortcut counting
+        group_actions = self._group_actions
+        result = True
+        errors = []
+        cnt = 0
+        for a in group_actions:
+            if isinstance(a, Action):
+                if a in seen_actions:
+                    cnt += 1
+            elif isinstance(a, UsageGroup):
+                result1 = self.eval_nested_test(a.testfn, errors, parser, seen_actions, *vargs, **kwargs)
+                if result1:
+                    cnt += 1
+            else:
+                pass # error action type unknown
+            if cnt>1:
+                break
+        return cnt, result, errors
+
     def _add_test(self):
         self.joiner = ' || ' # something better for xor?
         self.parens = '()' if self.required else '[]'
         # test equivalent the mutually_exclusive_groups
-        def testfn_cnt(parser, seen_actions, *vargs, **kwargs):
-            "xor()"
-            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
-            if cnt > 1:
-                msg = 'only one the arguments [%s] is allowed'
-            elif cnt == 0 and self.required:
-                msg = 'one of the arguments [%s] is required'
-            else:
-                msg = None
-            if msg:
-                self.raise_error(parser, msg)
-            return cnt>0 # True if something present, False if none
-
         def testfn(parser, seen_actions, *vargs, **kwargs):
             "xor()"
-            # test with shortcircuiting
-            group_actions = self._group_actions
-            dest_list = [a.dest for a in group_actions]
-            result = True
-            errors = []
-            cnt = 0
-            for a in group_actions:
-                if isinstance(a, Action):
-                    if a in seen_actions:
-                        cnt += 1
-                elif isinstance(a, UsageGroup):
-                    try:
-                        result1 = a.testfn(parser, seen_actions, *vargs, **kwargs)
-                    except GroupError as e:
-                        err = _sys.exc_info()[1]
-                        errors.append(str(err))
-                        result1 = False
-                    if result1:
-                        cnt += 1
-                else:
-                    pass # error action type unknown
-                if cnt>1:
-                    break
-            self.log('XOR (%s) %s'%(cnt, dest_list))
+            cnt, result, errors = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            self.log('XOR (%s) %s'%(cnt, self.arg_list()))
             if cnt > 1:
-                msg = 'only one the arguments [%s] is allowed'
+                msg = 'only one the arguments [%(dest)s] is allowed'
             elif cnt == 0 and self.required:
-                msg = 'one of the arguments [%s] is required'
+                msg = 'one of the arguments [%(dest)s] is required'
             else:
                 msg = None
             if msg:
-                self.raise_error(parser, msg)
+                self.raise_error(msg)
             return cnt>0
 
         self.testfn = testfn
         if self.dest is None:
             self.dest = self.testfn.__doc__
+
     def format(self):
+        # experiment with a custom format
         # tempting to make it __str__, but that's suppose to return string
         # this, to fit format_group expectations should return
         # list of strings and set of actions
-        fm = '^'.join([a.dest for a in self._group_actions])
+        # normally usage uses a.option_strings[0] rather than dest
+        fm = '^'.join(self.arg_list())
         fm = '((%s))'%fm
         return [fm], set(self._group_actions)
         # an alternative to 'usage' in complex cases is to put simple list
@@ -2295,29 +2306,53 @@ class _XorUsageGroup(UsageGroup):
 
 class _AndUsageGroup(UsageGroup):
     """and/inclusive etc """
+
+    def count_actions1(self, parser, seen_actions, *vargs, **kwargs):
+        # shortcut counting
+        group_actions = self._group_actions
+        result = True
+        errors = []
+        cnt = 0
+        for a in group_actions:
+            if isinstance(a, Action):
+                if a in seen_actions:
+                    cnt += 1
+                else:
+                    result = False
+                    break
+            elif isinstance(a, UsageGroup):
+                result1 = self.eval_nested_test(a.testfn, errors, parser, seen_actions, *vargs, **kwargs)
+                if result1:
+                    cnt += 1
+                else:
+                    result = False
+                    break
+            else:
+                pass # error action type unknown
+        return cnt, result, errors
+
     def _add_test(self):
         self.joiner = ' & ' # something better for xor?
         self.parens = '()' # if self.required else '[]'
-        def testfn_cnt(parser, seen_actions, *vargs, **kwargs):
+        def testfn(parser, seen_actions, *vargs, **kwargs):
             "and()"
-            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
-
+            #cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            cnt, result, errors = self.count_actions1(parser, seen_actions, *vargs, **kwargs)
             if cnt == 0 and self.required:
-                msg = 'all of the arguments [%s] is required'
+                msg = 'all of the arguments [%(dest)s] is required'
             elif 0 < cnt < len(self._group_actions): # all
-                    msg = 'all of the arguments [%s] are required'
+                    msg = 'all of the arguments [%(dest)s] are required'
             else:
                 msg = None
             if msg:
-                self.raise_error(parser, msg)
-            self.log('inc testing %s %s'%(cnt, [a.dest for a in self._group_actions]))
+                self.raise_error(msg)
+            self.log('inc testing %s %s'%(cnt, self.arg_list()))
             return cnt>0
-
-        def testfn(parser, seen_actions, *vargs, **kwargs):
+        """
+        def testfn1(parser, seen_actions, *vargs, **kwargs):
             "and()"
             # test with shortcircuiting
             group_actions = self._group_actions
-            dest_list = [a.dest for a in group_actions]
             result = True
             errors = []
             cnt = 0
@@ -2344,15 +2379,18 @@ class _AndUsageGroup(UsageGroup):
                         break
                 else:
                     pass # error action type unknown
-            if cnt==0 and self.required:
-                result = False
-                msg = 'all of (%s) required'
-            self.log('AND (%s) %s'%(result, dest_list))
-            if not result:
-                msg = 'all of [%s] required'
-                self.raise_error(parser, msg)
-            return result  # True
-
+            self.log('AND (%s) %s'%(cnt, self.arg_list()))
+            if cnt == 0 and self.required:
+                msg = 'all of the arguments [%(dest)s] is required'
+            elif 0 < cnt < len(group_actions): # all
+                assert result is False
+                msg = 'all of the arguments [%(dest)s] are required'
+            else:
+                msg = None
+            if msg:
+                self.raise_error(msg)
+            return cnt>0
+            """
         self.testfn = testfn
         if self.dest is None:
             self.dest = self.testfn.__doc__
@@ -2360,26 +2398,49 @@ class _AndUsageGroup(UsageGroup):
 
 class _OrUsageGroup(UsageGroup):
     """and/inclusive etc """
+
+    def count_actions1(self, parser, seen_actions, *vargs, **kwargs):
+        # shortcut counting
+        group_actions = self._group_actions
+        result = False
+        errors = []
+        cnt = 0
+        for a in group_actions:
+            if isinstance(a, Action):
+                if a in seen_actions:
+                    result = True
+                    cnt += 1
+                    break
+            elif isinstance(a, UsageGroup):
+                result1 = self.eval_nested_test(a.testfn, errors, parser, seen_actions, *vargs, **kwargs)
+                if result1:
+                    result = True
+                    cnt += 1
+                    break
+            else:
+                pass # error action type unknown
+        return cnt, result, errors
+
     def _add_test(self):
         self.joiner = ' | ' # something better for xor?
         self.parens = '{}' # if self.required else '[]'
-        def testfn_cnt(parser, seen_actions, *vargs, **kwargs):
+        def testfn(parser, seen_actions, *vargs, **kwargs):
             "any()"
-            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            #cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            cnt, result, errors = self.count_actions1(parser, seen_actions, *vargs, **kwargs)
             if cnt == 0 and self.required:
-                msg = 'some of the arguments [%s] is required'
+                msg = 'some of the arguments [%(dest)s] is required'
             else:
                 msg = None
             if msg:
-                self.raise_error(parser, msg)
-            self.log('any testing %s'%[a.dest for a in self._group_actions])
+                self.raise_error(msg)
+            self.log('any testing %s'%self.arg_list())
             return cnt>0
-
-        def testfn(parser, seen_actions, *vargs, **kwargs):
+        """
+        def testfn1(parser, seen_actions, *vargs, **kwargs):
             "or()"
             # test with shortcircuiting
             group_actions = self._group_actions
-            dest_list = [a.dest for a in group_actions]
             result = False
             errors = []
             for a in group_actions:
@@ -2405,42 +2466,67 @@ class _OrUsageGroup(UsageGroup):
                     pass # error action type unknown
             #if cnt==0 and self.required:
             #    result = False
-            #    msg = 'all of (%s) required'
+            #    msg = 'all of (%(dest)s) required'
             # what is different with required?
-            self.log('OR (%s) %s'%(result, dest_list))
+            self.log('OR (%s) %s'%(result, self.arg_list()))
             if not result:
-                msg = 'some of [%s] required'
-                self.raise_error(parser, msg)
+                msg = 'some of [%(dest)s] required'
+                self.raise_error(msg)
             return result  # True
-
+        """
         self.testfn = testfn
         if self.dest is None:
             self.dest = self.testfn.__doc__
 
 
-class _NotUsageGroup(UsageGroup):
-    """not() - same as nor()?"""
+class _NorUsageGroup(UsageGroup):
+    """not() - same as nor()?
+    not with multiple imputs"""
+
+    def count_actions1(self, parser, seen_actions, *vargs, **kwargs):
+        # shortcut counting
+        group_actions = self._group_actions
+        result = True
+        errors = []
+        cnt = 0
+        for a in group_actions:
+            if isinstance(a, Action):
+                if a in seen_actions:
+                    cnt += 1
+                    result = False
+                    break
+            elif isinstance(a, UsageGroup):
+                result1 = self.eval_nested_test(a.testfn, errors, parser, seen_actions, *vargs, **kwargs)
+                if result1:
+                    cnt += 1
+                    result = False
+                    break
+            else:
+                pass # error action type unknown
+        assert result==(cnt==0)
+        return cnt, result, errors
+
     def _add_test(self):
         self.joiner = ', '
         self.parens = ['not(',')']
-        def testfn_cnt(parser, seen_actions, *vargs, **kwargs):
+        def testfn(parser, seen_actions, *vargs, **kwargs):
             "not()"
             # returns cnt==0; if required raise error
-            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
-            self.log('not test %s %s'%(cnt, [a.dest for a in self._group_actions]))
+            #cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            cnt, result, errors = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            self.log('not test %s %s'%(cnt, self.arg_list()))
             if cnt > 0 and self.required:
-                msg = 'none of the arguments [%s] is allowed'
+                msg = 'none of the arguments [%(dest)s] is allowed'
             else:
                 msg = None
             if msg:
-                self.raise_error(parser, msg)
+                self.raise_error(msg)
             return cnt==0
-
-        def testfn(parser, seen_actions, *vargs, **kwargs):
+        """
+        def testfn1(parser, seen_actions, *vargs, **kwargs):
             "not()"
             # test with shortcircuiting
             group_actions = self._group_actions
-            dest_list = [a.dest for a in group_actions]
             result = True
             errors = []
             cnt = 0
@@ -2465,12 +2551,12 @@ class _NotUsageGroup(UsageGroup):
                         continue
                 else:
                     pass # error action type unknown
-            self.log('NOT (%s) %s'%(result, dest_list))
+            self.log('NOT (%s) %s'%(result, self.arg_list()))
             if not result:
-                msg = 'none of [%s] allowed'
-                self.raise_error(parser, msg)
+                msg = 'none of [%(dest)s] allowed'
+                self.raise_error(msg)
             return result  # True
-
+        """
         self.testfn = testfn
         if self.dest is None:
             self.dest = self.testfn.__doc__
@@ -2478,33 +2564,58 @@ class _NotUsageGroup(UsageGroup):
 
 class _NandUsageGroup(UsageGroup):
     """and/inclusive etc """
+
+    def count_actions1(self, parser, seen_actions, *vargs, **kwargs):
+        # shortcut counting
+        group_actions = self._group_actions
+        result = False
+        errors = []
+        cnt = 0
+        for a in group_actions:
+            if isinstance(a, Action):
+                if a in seen_actions:
+                    cnt += 1
+                else:
+                    result = True
+                    break
+            elif isinstance(a, UsageGroup):
+                result1 = self.eval_nested_test(a.testfn, errors, parser, seen_actions, *vargs, **kwargs)
+                if result1:
+                    cnt += 1
+                else:
+                    result = True
+                    break
+            else:
+                pass # error action type unknown
+        return cnt, result, errors
+
     def _add_test(self):
         self.joiner = ' & ' # something better for xor?
         self.parens = ['!(',')'] # if self.required else '[]'
-        def testfn_cnt(parser, seen_actions, *vargs, **kwargs):
+        def testfn(parser, seen_actions, *vargs, **kwargs):
             "nand()"
             # not(and(...))
             # or(not(),not()...) - at least one is not present
-            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            #cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            cnt, result, errors = self.count_actions1(parser, seen_actions, *vargs, **kwargs)
             if cnt==len(self._group_actions):
-                msg = 'one of (%s) must be absent'
+                msg = 'one of (%(dest)s) must be absent'
             elif cnt==0:
                 msg = None # ?
             else:
                 msg = None
             # what differences does self.required make?
-            self.log('NAND (%s) %s'%(cnt, [a.dest for a in self._group_actions]))
+            self.log('NAND (%s) %s'%(cnt, self.arg_list()))
             if msg:
-                self.raise_error(parser, msg)
+                self.raise_error(msg)
             return True
-
-        def testfn(parser, seen_actions, *vargs, **kwargs):
+        '''
+        def testfn1(parser, seen_actions, *vargs, **kwargs):
             "nand()"
             # test with shortcircuiting
             # what effect should require have?
             # if require, there must be atleast one seen action?
             group_actions = self._group_actions
-            dest_list = [a.dest for a in group_actions]
             result = False
             errors = []
             for a in group_actions:
@@ -2531,12 +2642,12 @@ class _NandUsageGroup(UsageGroup):
                         break
                 else:
                     pass # error action type unknown
-            self.log('nand testing (%s) %s'%(result, dest_list))
+            self.log('nand testing (%s) %s'%(result, self.arg_list()))
             if not result:
-                msg = 'one of %s must be absent'
-                self.raise_error(parser, msg)
+                msg = 'one of %(dest)s must be absent'
+                self.raise_error(msg)
             return result  # True
-
+        '''
         self.testfn = testfn
         if self.dest is None:
             self.dest = self.testfn.__doc__
