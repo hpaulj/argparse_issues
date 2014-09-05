@@ -55,6 +55,13 @@ The module contains the following public classes:
         ArgumentDefaultsHelpFormatter adds information about argument defaults
         to the help.
 
+    - UsageGroup, GroupError, UsageGroupHelpFormatter -- a nestable argument
+        group that defines a variety of co-occurance tests for arguments.
+        Normally a group is created by a add_usage_group() method call, but
+        that method will also take a UsageGroup instance as an argument.
+        A custom help formatter class is currently required to handle the
+        display of these groups in the usage line.
+
 All other classes in this module are considered implementation details.
 (Also note that HelpFormatter and RawDescriptionHelpFormatter are only
 considered public as object names -- the API of the formatter objects is
@@ -72,14 +79,17 @@ __all__ = [
     'RawDescriptionHelpFormatter',
     'RawTextHelpFormatter',
     'MetavarTypeHelpFormatter',
+    'UsageGroupHelpFormatter',
     'Namespace',
     'Action',
+    'UsageGroup',
     'ONE_OR_MORE',
     'OPTIONAL',
     'PARSER',
     'REMAINDER',
     'SUPPRESS',
     'ZERO_OR_MORE',
+    'GroupError',
 ]
 
 
@@ -684,6 +694,253 @@ class MetavarTypeHelpFormatter(HelpFormatter):
         return action.type.__name__
 
 
+class UsageGroupHelpFormatter(HelpFormatter):
+    """Help message formatter that handles usage groups.
+
+    Only the name of this class is considered a public API. All the methods
+    provided by the class are considered an implementation detail.
+
+    This formats all the groups, even if they share actions, or the actions
+    do not occur in the other in which they were defined (in parse._actions)
+    Thus an action may appear in more than one group
+    Groups are presented in an order that preserves the order of positionals
+
+    Adapted from a reworked usage formatter developed for issue 10984
+    """
+
+    def _format_usage(self, usage, actions, groups, prefix):
+        #
+        if prefix is None:
+            prefix = _('usage: ')
+
+        # if usage is specified, use that
+        if usage is not None:
+            usage = usage % dict(prog=self._prog)
+
+        # if no optionals or positionals are available, usage is just prog
+        elif usage is None and not actions:
+            usage = '%(prog)s' % dict(prog=self._prog)
+
+        # if optionals and positionals are available, calculate usage
+        elif usage is None:
+            prog = '%(prog)s' % dict(prog=self._prog)
+            #optionals = [action for action in actions if action.option_strings]
+            #positionals = [action for action in actions if not action.option_strings]
+
+            # build full usage string
+            format = self._format_actions_usage
+            # (opt_parts, pos_parts) = format(optionals + positionals, groups)
+            (opt_parts, arg_parts, pos_parts) = format(actions, groups)
+            all_parts = opt_parts + arg_parts + pos_parts
+
+            usage = ' '.join([prog]+all_parts)
+            opt_parts = opt_parts + arg_parts # for now join these
+
+            # the rest is the same as in the parent formatter
+            # wrap the usage parts if it's too long
+            text_width = self._width - self._current_indent
+            if len(prefix) + len(usage) > text_width:
+                # helper for wrapping lines
+                def get_lines(parts, indent, prefix=None):
+                    lines = []
+                    line = []
+                    if prefix is not None:
+                        line_len = len(prefix) - 1
+                    else:
+                        line_len = len(indent) - 1
+                    for part in parts:
+                        if line and line_len + 1 + len(part) > text_width:
+                            lines.append(indent + ' '.join(line))
+                            line = []
+                            line_len = len(indent) - 1
+                        line.append(part)
+                        line_len += len(part) + 1
+                    if line:
+                        lines.append(indent + ' '.join(line))
+                    if prefix is not None:
+                        lines[0] = lines[0][len(indent):]
+                    return lines
+
+                # if prog is short, follow it with optionals or positionals
+                if len(prefix) + len(prog) <= 0.75 * text_width:
+                    indent = ' ' * (len(prefix) + len(prog) + 1)
+                    if opt_parts:
+                        lines = get_lines([prog] + opt_parts, indent, prefix)
+                        lines.extend(get_lines(pos_parts, indent))
+                    elif pos_parts:
+                        lines = get_lines([prog] + pos_parts, indent, prefix)
+                    else:
+                        lines = [prog]
+
+                # if prog is long, put it on its own line
+                else:
+                    indent = ' ' * len(prefix)
+                    parts = opt_parts + pos_parts
+                    lines = get_lines(parts, indent)
+                    if len(lines) > 1:
+                        lines = []
+                        lines.extend(get_lines(opt_parts, indent))
+                        lines.extend(get_lines(pos_parts, indent))
+                    lines = [prog] + lines
+
+                # join lines into usage
+                usage = '\n'.join(lines)
+
+        # prefix with 'usage:'
+        return '%s%s\n\n' % (prefix, usage)
+
+    def _format_actions_usage(self, actions, groups):
+        # usage will list
+        # optionals that are not in a group
+        # actions in groups, with possible repetitions
+        # positionals that are not in a group
+        # It orders groups with positionals to preserved the parsing order
+        # (this ordering may be fragile - tempted to remove it)
+        # also the options groups positionals order might be optional
+        actions = actions[:] # work with copy, not original
+        groups = self._group_sort(actions, groups)
+        seen_actions = set()
+        arg_parts = []
+        for group in groups:
+            #gactions = group._group_actions
+            if True:
+                group_parts, gactions = self._format_group_usage(group)
+                seen_actions.update(gactions)
+                arg_parts.extend(group_parts)
+
+        # now format all remaining actions
+        for act in seen_actions:
+            try:
+                actions.remove(act)
+            except ValueError:
+                pass
+        # find optionals and positionals in the remaining actions list
+        # i.e. ones that are not in any group
+        optionals = [action for action in actions if action.option_strings]
+        positionals = [action for action in actions if not action.option_strings]
+
+        opt_parts = self._format_just_actions_usage(optionals)
+        #arg_parts = parts + arg_parts
+
+        pos_parts = self._format_just_actions_usage(positionals)
+        # keep pos_parts separate, so they can be handled separately in long lines
+        return (opt_parts, arg_parts, pos_parts)
+
+    def _group_sort(self, actions, groups):
+        # sort groups by order of positionals, if any
+        from operator import itemgetter
+        if len(groups)==0:
+            return groups
+        optionals = [action for action in actions if action.option_strings]
+        positionals = [action for action in actions if not action.option_strings]
+
+        # create a sort key, based on position of action in actions
+        posdex = [-1]*len(groups)
+        noInGroups = set(positionals)
+        for i,group in enumerate(groups):
+            group_actions = group._group_actions
+            for action in group_actions:
+                if action in positionals:
+                    posdex[i] = positionals.index(action)
+                    noInGroups.discard(action)
+        sortGroups = groups[:]
+        # actions not found in any group are put in their own tempory groups
+        samplegroup = group
+        for action in noInGroups:
+            g = _copy.copy(samplegroup)
+            g.required = action.required
+            g._group_actions = [action]
+            sortGroups.append(g)
+            posdex.append(positionals.index(action))
+
+        sortGroups = sorted(zip(sortGroups,posdex), key=itemgetter(1))
+        sortGroups = [i[0] for i in sortGroups]
+        return sortGroups
+
+    def _format_group_usage(self, group):
+        # format one usage group
+        # returns usage as list of strings, and a set of actions that were 'seen'
+        joiner = getattr(group, 'joiner', ' | ')
+        required = getattr(group, 'required', False)
+        parens = '()' if required else '[]'
+        parens = getattr(group, 'parens', parens) # let group define its own brackets
+        format = getattr(group, 'format', None)
+        if format:
+            return format()
+        usage = getattr(group, 'usage', None)
+        if usage:
+            # shortcut if usage is given
+            # what actions, if any, should be returned
+            # safe to assume usage is a string, as opposed to list?
+            return [usage], set()
+        seen_actions = set()
+
+        actions = group._group_actions
+        parts = []
+
+        parts += parens[0]
+        for action in actions:
+            if isinstance(action, UsageGroup):
+                part, gactions = self._format_group_usage(action)
+                seen_actions.update(gactions)
+                part = part[0]
+            else:
+                part = self._format_just_actions_usage([action])
+                part = _re.sub(r'^\[(.*)\]$', r'\1', part[0]) # remove 'optional'[]
+                seen_actions.add(action)
+            if part:
+                parts.append(part)
+                parts.append(joiner)
+        if len(parts)>1:
+            parts[-1] = parens[1]
+        else:
+            # nothing added
+            parts = []
+        arg_parts = [''.join(parts)]
+
+        def cleanup(text):
+            # remove unnecessary ()
+            pat = r'^\(([^(%s)]*)\)$'%joiner # is this robust enough?
+            text = _re.sub(pat, r'\1', text)
+            return text
+        # this cleanup applies if group is empty or has single item
+        # lets skip this for now
+        # arg_parts = [cleanup(t) for t in arg_parts]
+        return arg_parts, seen_actions
+
+    def _format_just_actions_usage(self, actions):
+        # actions, without any group markings
+        # part of the reformatted HelpFormatter
+        parts = []
+        for action in actions:
+            if action.help is SUPPRESS:
+                pass
+            elif not action.option_strings:
+                default = self._get_default_metavar_for_positional(action)
+                #part = action._format_args(default)
+                part = self._format_args(action, default)
+                parts.append(part)
+            else:
+                option_string = action.option_strings[0]
+
+                # if the Optional doesn't take a value, format is:
+                #    -s or --long
+                if action.nargs == 0:
+                    part = '%s' % option_string
+
+                # if the Optional takes a value, format is:
+                #    -s ARGS or --long ARGS
+                else:
+                    default = self._get_default_metavar_for_optional(action)
+                    #args_string = action._format_args(default)
+                    args_string = self._format_args(action, default)
+                    part = '%s %s' % (option_string, args_string)
+
+                # make it look optional if it's not required
+                if not action.required:
+                    part = '[%s]' % part
+                parts.append(part)
+        return parts
 
 # =====================
 # Options and Arguments
@@ -726,6 +983,19 @@ class ArgumentTypeError(Exception):
     """An error from trying to convert a command line string to a type."""
     pass
 
+class GroupError(Exception):
+    """An error generated by a usage group """
+    def __init__(self, argument, message):
+        self.argument_name = argument.get_name()
+        self.message = message
+
+    def __str__(self):
+        if self.argument_name is None:
+            format = '%(message)s'
+        else:
+            format = 'group %(argument_name)s: %(message)s'
+        return format % dict(message=self.message,
+                             argument_name=self.argument_name)
 
 # ==============
 # Action classes
@@ -1251,6 +1521,7 @@ class _ActionsContainer(object):
         # groups
         self._action_groups = []
         self._mutually_exclusive_groups = []
+        self._usage_groups = []
 
         # defaults storage
         self._defaults = {}
@@ -1351,6 +1622,50 @@ class _ActionsContainer(object):
         self._mutually_exclusive_groups.append(group)
         return group
 
+    def add_mutually_exclusive_group1(self, **kwargs):
+        # usage_group masquarading as a mutally_exclusive_group
+        kwargs.update(kind='xor')
+        return self.add_usage_group(**kwargs)
+
+    def add_usage_group(self, **kwargs):
+        # create a UsageGroup - here it is added to a Container
+        if 'title' in kwargs:
+            ag_keys = ['title', 'description', 'prefix_chars',
+                       'argument_default', 'conflict_handler']
+            args = {k:kwargs[k] for k in ag_keys if k in kwargs}
+            container = self.add_argument_group(**args)
+        else:
+            container = self
+        #kwargs.pop('title', None)
+        #kwargs.pop('description', None)
+        group = UsageGroup.create(container, **kwargs)
+        container._usage_groups.append(group)
+        return group
+
+    def add_usage_test(self, func, **kwargs):
+        """add a usage group based on 'func'
+        e.g.
+        def test(parser, seen_actions, *args):
+            "test3"
+            if act_g not in seen_actions and act_wid in seen_actions:
+            parser.error('not g, so not wid')
+        works as a decorator, though technically not
+        it has side effects (adding it to list);
+        though it does take a function and return
+        a group - which is callable
+        """
+        kwargs.setdefault('testfn', func)
+        kwargs.setdefault('usage', func.__doc__)
+        kwargs.setdefault('dest', 'test')
+        return self.add_usage_group(**kwargs)
+
+    def usagetest(self, **kwargs):
+        # is this a better decorator
+        def wrapper(func):
+            return self.add_usage_test(func, **kwargs)
+        return wrapper
+
+
     def _add_action(self, action):
         # resolve any conflicts
         self._check_conflict(action)
@@ -1414,6 +1729,7 @@ class _ActionsContainer(object):
         # add all actions to this container or their group
         for action in container._actions:
             group_map.get(action, self)._add_action(action)
+        # needs usage_groups handling
 
     def _get_positional_kwargs(self, dest, **kwargs):
         # make sure required is not specified
@@ -1541,6 +1857,7 @@ class _ArgumentGroup(_ActionsContainer):
         self._has_negative_number_optionals = \
             container._has_negative_number_optionals
         self._mutually_exclusive_groups = container._mutually_exclusive_groups
+        self._usage_groups = container._usage_groups
 
     def _add_action(self, action):
         action = super(_ArgumentGroup, self)._add_action(action)
@@ -1570,6 +1887,659 @@ class _MutuallyExclusiveGroup(_ArgumentGroup):
     def _remove_action(self, action):
         self._container._remove_action(action)
         self._group_actions.remove(action)
+
+
+class UsageGroup(_AttributeHolder, _ArgumentGroup):
+    """Object for testing co-occurance of arguments.
+    Arguments:
+        - container - parser or other group
+    Keyword Arguments:
+        - arguments that the super(s) accept
+        - kind -- predefined testfn (and parens and joiner)
+        - dest -- name that may be used in usage and error display
+        - required -- boolean (default False)
+        - parens -- characters to bracket the group in the usage display
+        - joiner -- infix character(s) for usage
+        - testfn -- function to be used as the test
+        - usage -- preformatted usage
+
+    """
+    @staticmethod
+    def create(container, **kwargs):
+        if container._registries.get('usage',None) is None:
+            # initialize the registry (if needed)
+            container.register('usage', 'xor', _XorUsageGroup)
+            container.register('usage', 'mxg', _XorUsageGroup)
+            container.register('usage', 'and', _AndUsageGroup)
+            container.register('usage', 'all', _AndUsageGroup)
+            container.register('usage', 'inc', _AndUsageGroup)
+            container.register('usage', 'or', _OrUsageGroup)
+            container.register('usage', 'any', _OrUsageGroup)
+            container.register('usage', 'not', _NotUsageGroup)
+            container.register('usage', 'nand', _NandUsageGroup)
+        kind = kwargs['kind']
+        kind = container._registry_get('usage', kind, kind)
+        if not isinstance(kind, type):
+            kind = UsageGroup
+        group = kind(container, **kwargs)
+        return group
+
+    def __init__(self, container, **kwargs):
+        # call super with subset of the kwargs
+        ag_keys = ['title', 'description', 'prefix_chars',
+                    'argument_default', 'conflict_handler']
+        args = {k:kwargs[k] for k in ag_keys if k in kwargs}
+        super(UsageGroup, self).__init__(container, **args)
+        self.container = container  # _container to be consistent with MXG
+        self.dest = kwargs.pop('dest', None)
+        self.required = kwargs.pop('required', False)
+        self.parens = kwargs.pop('parens', None)
+        self.joiner = kwargs.pop('joiner', None)
+        self.testfn = kwargs.pop('testfn', None)
+        self.usage = kwargs.pop('usage', None)
+        self.kind = kwargs.pop('kind', None)
+        if isinstance(container, ArgumentParser):
+            self.parser = container # place to put Actions
+        else:
+            self.parser = getattr(container, 'parser', container)
+
+        self._add_test()
+        # potentially might define Action like attributes to help format it
+        # e.g. help, option_strings
+        for k in ag_keys: kwargs.pop(k, None)
+        if len(kwargs.keys()):
+            self.log('left over kwargs:%s'% kwargs)
+            # do we object to these (view them as errors)
+            # or ignore them
+            # or add them to the object (to be used, for example, in the test)?
+
+    def log(self, message):
+        # diagnostic prints
+        if self.dest:
+            message = '...{}: {}'.format(self.dest, message)
+        print(message, file=_sys.stderr)
+
+    def _get_kwargs(self):
+        names = [
+            'dest',
+            'usage',
+            'kind',
+            'required',
+            #'testdoc',
+        ]
+        return [(name, getattr(self, name)) for name in names]
+
+    def get_name(self):
+        """
+        Group name, used in error messages
+        can also be used by help line formatter
+        """
+        if self.dest is not None:
+            return self.dest
+        return 'unknown'
+
+    def _add_test(self):
+        # define formatting and testing, based on 'kind' and 'required'
+        # (and potentially other attributes)
+        # some alternatives only differ in the choice of 'joiner'
+        if self.testfn is None:
+            if self.kind in ['mxg', 'mx', 'ecl', 'excl', 'exclusive']:
+                joiner, parens, testfn = self.test_mx_group()
+            elif self.kind in ['xor']:
+                joiner, parens, testfn = self.test_mx_group()
+                joiner = ' ^ '
+                # ^ is the bitwise xor; but | is the legacy mxg joiner
+            elif self.kind in ['inc', 'inclusive', 'all']:
+                joiner, parens, testfn = self.test_inc_group()
+            elif self.kind in ['or']:
+                joiner, parens, testfn = self.test_any_group()
+            elif self.kind in ['any']:
+                joiner, parens, testfn = self.test_any_group()
+                joiner = ' , '
+            elif self.kind in ['not']:
+                joiner, parens, testfn = self.test_not_group()
+            else:
+                joiner, parens, testfn = self.test_this_group()
+        else:
+            joiner, parens = ',','()'
+        if self.joiner is None: self.joiner = joiner
+        if self.parens is None: self.parens = parens
+        if self.testfn is None: self.testfn = testfn
+        # self.testdoc = self.testfn.__doc__
+        if self.dest is None:
+            self.dest = self.testfn.__doc__
+        """
+        if not isinstance(self.container, UsageGroup):
+            name = str(id(self)) # a unique key for this test
+            self.container.register('usage_tests', name, self) #self.testfn)
+        """
+
+    #def _format_args(self, *args):
+    #    return ''
+
+    def _add_action(self, action):
+        if self.kind in ['mxg'] and action.required:
+            msg = _('mutually exclusive arguments must be optional')
+            raise ValueError(msg)
+        # add action to parser, but not container
+        action = self.parser._add_action(action)
+        self._group_actions.append(action)
+        return action
+
+    def add_usage_group(self, *args, **kwargs):
+        if len(args) and isinstance(args[0], UsageGroup):
+            group = args[0]
+        else:
+            title = kwargs.pop('title', None)
+            if title:
+                self.log('ignored nested title: %s'% title) # ignore at this level
+                # for now, argument groups cannot be nested
+            group = UsageGroup.create(self, **kwargs)
+        self._group_actions.append(group)
+        return group
+
+    def add_argument(self, *args, **kwargs):
+        # add extension that allows adding a prexisting Action
+        if len(args) and isinstance(args[0], Action):
+            # add the action to self, but not to the parser (it is already there)
+            action =  args[0]
+            self._group_actions.append(action)
+            return action
+        else:
+            return super(UsageGroup, self).add_argument(*args, **kwargs)
+
+    def raise_error(self, parser, msg):
+        # common method of testfn
+        names = [action.dest for action in self._group_actions]
+        names = ', '.join(names)
+        msg = msg % names
+        """
+        if self.dest:
+            msg = '%s: %s'%(self.dest, msg)
+        parser.error(msg)
+        """
+        self.log('ERROR: %s'%msg)
+        raise GroupError(self, msg)
+
+    def count_actions(self, parser, seen_actions, *vargs, **kwargs):
+        # utility that is useful in most kinds of tests
+        # count the number of group actions (and groups) that are seen
+        seen_actions = set(seen_actions)
+        group_actions = self._group_actions
+        actions = [a for a in group_actions if isinstance(a, Action)]
+        okactions = {a for a in actions if a in seen_actions}
+        groups = [a for a in group_actions if isinstance(a, UsageGroup)]
+
+        okgroups = []
+        errors = []
+        for a in groups:
+            try:
+                result = a.testfn(parser, seen_actions, *vargs, **kwargs)
+            except GroupError as e:
+                err = _sys.exc_info()[1]
+                errors.append(str(err))
+                result = False
+            if result:
+                okgroups.append(a)
+        okgroups = set(okgroups)
+        # what do with errors?
+        # okgroups = {a for a in groups if a.testfn(parser, seen_actions, *vargs, **kwargs)}
+        # {a for a in groups if a(parser, ...)} # callable 'a'
+        okactions = okactions.union(okgroups)
+        cnt = len(okactions)
+        # possibly
+        # if cnt==0:
+        #     self.raise_error with errors list
+        return cnt
+
+    def test_this_group(self):
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            # default usage test
+            group_actions = self._group_actions
+            group_seen = set(seen_actions).intersection(group_actions)
+            cnt = len(group_seen)
+            self.log('nested testing %s'%[a.dest for a in group_actions])
+        return ', ', '()', testfn
+
+    def test_mx_group(self):
+        joiner = ' | ' # something better for xor?
+        parens = '()' if self.required else '[]'
+        # test equivalent the mutually_exclusive_groups
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            "xor()"
+            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            if cnt > 1:
+                msg = 'only one the arguments [%s] is allowed'
+            elif cnt == 0 and self.required:
+                msg = 'one of the arguments [%s] is required'
+            else:
+                msg = None
+            if msg:
+                self.raise_error(parser, msg)
+            return cnt>0 # True if something present, False if none
+        return joiner, parens, testfn
+
+    def test_inc_group(self):
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            "all()"
+            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+
+            if cnt == 0 and self.required:
+                msg = 'all of the arguments [%s] is required'
+            elif 0 < cnt < len(self._group_actions): # all
+                    msg = 'all of the arguments [%s] are required'
+            else:
+                msg = None
+            if msg:
+                self.raise_error(parser, msg)
+            self.log('inc testing %s %s'%(cnt, [a.dest for a in self._group_actions]))
+            return cnt>0
+        return ' & ', '()', testfn
+
+    def test_any_group(self):
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            "any()"
+            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            if cnt == 0 and self.required:
+                msg = 'some of the arguments [%s] is required'
+            else:
+                msg = None
+            if msg:
+                self.raise_error(parser, msg)
+            self.log('any testing %s'%([a.dest for a in self._group_actions]))
+            return cnt>0
+        return ' | ', '{}', testfn
+
+    def test_not_group(self):
+        joiner = ', '
+        parens = ['not(',')']
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            "not()"
+            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            self.log('not test %s %s'%(cnt, [a.dest for a in self._group_actions]))
+            if cnt > 0 and self.required:
+                msg = 'none of the arguments [%s] is allowed'
+            else:
+                msg = None
+            if msg:
+                self.raise_error(parser, msg)
+            return cnt==0
+        return joiner, parens, testfn
+
+    def __call__(self, *args, **kwargs):
+        # calling this object runs its test function
+        # any qualifications?
+        return self.testfn(*args, **kwargs)
+
+    # group_actions can include actions and other UsageGroups
+    # 'kind' denotes some sort of test, e.g. like mut-exclusive
+    #    mut-exclusive - like m-e-g but allows for 'presense' of ngroup
+    #       ie at most one of actions or groups allowed
+    #       x req = only one allowed
+    #    mut-inclusive - all present
+    #    mut-any - cnt >=0, or >0 if required
+    #    mut-null - no test
+
+    # add some sort of usage formatting; symbol atleast (| for mxg; & for inc)
+    # diff between true or, and xor; maybe symbol is a string
+    # group does not have attribute 'get_name', nor 'help'
+
+    @staticmethod
+    def tree(gp, indent='', seen=[]):
+        # display nesting tree of usage groups (diagnostic)
+        if isinstance(gp, ArgumentParser):
+            name = gp.prog
+            children = gp._usage_groups
+        elif isinstance(gp, UsageGroup):
+            name = '%s %s %s'%(gp.dest, gp.kind, type(gp).__name__)
+            children = gp._group_actions
+        else:
+            name = gp.dest
+            children = []
+        print(indent+name)
+        if gp in seen:
+            if isinstance(gp, UsageGroup):
+                print(indent+'  ...')
+            return
+        seen.append(gp)
+        for child in children:
+            UsageGroup.tree(child, indent=indent+'  ')
+
+    def eval_nested_test(self, testfn, errors, parser, seen_actions, *vargs, **kwargs):
+        # evaluate testfn and trap error messages
+        # normally a testfn returns True or raises a GroupError
+        # this changes it to returning True/False, and appending errors to a list
+        # alt: testfn could be written to operate like this
+        # this could be static, since it does not reference self
+        # accumulating errors from nested tests is undecided
+        # when should they be ignored, collected, or allowed to percolate up?
+        try:
+            result1 = testfn(parser, seen_actions, *vargs, **kwargs)
+        except GroupError as e:
+            err = _sys.exc_info()[1]
+            errors.append(str(err))
+            result1 = False
+        return result1
+
+class _XorUsageGroup(UsageGroup):
+    """xor/mutually_exclusive etc """
+    # start True, cnt=0; if found +=1; if cnt>1 error
+    # if required and cnt==0; error
+    def _add_test(self):
+        self.joiner = ' || ' # something better for xor?
+        self.parens = '()' if self.required else '[]'
+        # test equivalent the mutually_exclusive_groups
+        def testfn_cnt(parser, seen_actions, *vargs, **kwargs):
+            "xor()"
+            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            if cnt > 1:
+                msg = 'only one the arguments [%s] is allowed'
+            elif cnt == 0 and self.required:
+                msg = 'one of the arguments [%s] is required'
+            else:
+                msg = None
+            if msg:
+                self.raise_error(parser, msg)
+            return cnt>0 # True if something present, False if none
+
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            "xor()"
+            # test with shortcircuiting
+            group_actions = self._group_actions
+            dest_list = [a.dest for a in group_actions]
+            result = True
+            errors = []
+            cnt = 0
+            for a in group_actions:
+                if isinstance(a, Action):
+                    if a in seen_actions:
+                        cnt += 1
+                elif isinstance(a, UsageGroup):
+                    try:
+                        result1 = a.testfn(parser, seen_actions, *vargs, **kwargs)
+                    except GroupError as e:
+                        err = _sys.exc_info()[1]
+                        errors.append(str(err))
+                        result1 = False
+                    if result1:
+                        cnt += 1
+                else:
+                    pass # error action type unknown
+                if cnt>1:
+                    break
+            self.log('XOR (%s) %s'%(cnt, dest_list))
+            if cnt > 1:
+                msg = 'only one the arguments [%s] is allowed'
+            elif cnt == 0 and self.required:
+                msg = 'one of the arguments [%s] is required'
+            else:
+                msg = None
+            if msg:
+                self.raise_error(parser, msg)
+            return cnt>0
+
+        self.testfn = testfn
+        if self.dest is None:
+            self.dest = self.testfn.__doc__
+    def format(self):
+        # tempting to make it __str__, but that's suppose to return string
+        # this, to fit format_group expectations should return
+        # list of strings and set of actions
+        fm = '^'.join([a.dest for a in self._group_actions])
+        fm = '((%s))'%fm
+        return [fm], set(self._group_actions)
+        # an alternative to 'usage' in complex cases is to put simple list
+        # of actions in usage
+        # and some sort of logic tree or description in 'description'
+
+
+class _AndUsageGroup(UsageGroup):
+    """and/inclusive etc """
+    def _add_test(self):
+        self.joiner = ' & ' # something better for xor?
+        self.parens = '()' # if self.required else '[]'
+        def testfn_cnt(parser, seen_actions, *vargs, **kwargs):
+            "and()"
+            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+
+            if cnt == 0 and self.required:
+                msg = 'all of the arguments [%s] is required'
+            elif 0 < cnt < len(self._group_actions): # all
+                    msg = 'all of the arguments [%s] are required'
+            else:
+                msg = None
+            if msg:
+                self.raise_error(parser, msg)
+            self.log('inc testing %s %s'%(cnt, [a.dest for a in self._group_actions]))
+            return cnt>0
+
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            "and()"
+            # test with shortcircuiting
+            group_actions = self._group_actions
+            dest_list = [a.dest for a in group_actions]
+            result = True
+            errors = []
+            cnt = 0
+            for a in group_actions:
+                if isinstance(a, Action):
+                    if a in seen_actions:
+                        cnt += 1
+                        continue
+                    else:
+                        result = False
+                        break
+                elif isinstance(a, UsageGroup):
+                    try:
+                        result1 = a.testfn(parser, seen_actions, *vargs, **kwargs)
+                    except GroupError as e:
+                        err = _sys.exc_info()[1]
+                        errors.append(str(err))
+                        result1 = False
+                    if result1:
+                        cnt += 1
+                        continue
+                    else:
+                        result = False
+                        break
+                else:
+                    pass # error action type unknown
+            if cnt==0 and self.required:
+                result = False
+                msg = 'all of (%s) required'
+            self.log('AND (%s) %s'%(result, dest_list))
+            if not result:
+                msg = 'all of [%s] required'
+                self.raise_error(parser, msg)
+            return result  # True
+
+        self.testfn = testfn
+        if self.dest is None:
+            self.dest = self.testfn.__doc__
+
+
+class _OrUsageGroup(UsageGroup):
+    """and/inclusive etc """
+    def _add_test(self):
+        self.joiner = ' | ' # something better for xor?
+        self.parens = '{}' # if self.required else '[]'
+        def testfn_cnt(parser, seen_actions, *vargs, **kwargs):
+            "any()"
+            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            if cnt == 0 and self.required:
+                msg = 'some of the arguments [%s] is required'
+            else:
+                msg = None
+            if msg:
+                self.raise_error(parser, msg)
+            self.log('any testing %s'%[a.dest for a in self._group_actions])
+            return cnt>0
+
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            "or()"
+            # test with shortcircuiting
+            group_actions = self._group_actions
+            dest_list = [a.dest for a in group_actions]
+            result = False
+            errors = []
+            for a in group_actions:
+                if isinstance(a, Action):
+                    if a in seen_actions:
+                        result = True
+                        break
+                    else:
+                        continue
+                elif isinstance(a, UsageGroup):
+                    try:
+                        result1 = a.testfn(parser, seen_actions, *vargs, **kwargs)
+                    except GroupError as e:
+                        err = _sys.exc_info()[1]
+                        errors.append(str(err))
+                        result1 = False
+                    if result1:
+                        result = True
+                        break
+                    else:
+                        continue
+                else:
+                    pass # error action type unknown
+            #if cnt==0 and self.required:
+            #    result = False
+            #    msg = 'all of (%s) required'
+            # what is different with required?
+            self.log('OR (%s) %s'%(result, dest_list))
+            if not result:
+                msg = 'some of [%s] required'
+                self.raise_error(parser, msg)
+            return result  # True
+
+        self.testfn = testfn
+        if self.dest is None:
+            self.dest = self.testfn.__doc__
+
+
+class _NotUsageGroup(UsageGroup):
+    """not() - same as nor()?"""
+    def _add_test(self):
+        self.joiner = ', '
+        self.parens = ['not(',')']
+        def testfn_cnt(parser, seen_actions, *vargs, **kwargs):
+            "not()"
+            # returns cnt==0; if required raise error
+            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            self.log('not test %s %s'%(cnt, [a.dest for a in self._group_actions]))
+            if cnt > 0 and self.required:
+                msg = 'none of the arguments [%s] is allowed'
+            else:
+                msg = None
+            if msg:
+                self.raise_error(parser, msg)
+            return cnt==0
+
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            "not()"
+            # test with shortcircuiting
+            group_actions = self._group_actions
+            dest_list = [a.dest for a in group_actions]
+            result = True
+            errors = []
+            cnt = 0
+            for a in group_actions:
+                if isinstance(a, Action):
+                    if a in seen_actions:
+                        result = False
+                        break
+                    else:
+                        continue
+                elif isinstance(a, UsageGroup):
+                    try:
+                        result1 = a.testfn(parser, seen_actions, *vargs, **kwargs)
+                    except GroupError as e:
+                        err = _sys.exc_info()[1]
+                        errors.append(str(err))
+                        result1 = False
+                    if result1:
+                        result = False
+                        break
+                    else:
+                        continue
+                else:
+                    pass # error action type unknown
+            self.log('NOT (%s) %s'%(result, dest_list))
+            if not result:
+                msg = 'none of [%s] allowed'
+                self.raise_error(parser, msg)
+            return result  # True
+
+        self.testfn = testfn
+        if self.dest is None:
+            self.dest = self.testfn.__doc__
+
+
+class _NandUsageGroup(UsageGroup):
+    """and/inclusive etc """
+    def _add_test(self):
+        self.joiner = ' & ' # something better for xor?
+        self.parens = ['!(',')'] # if self.required else '[]'
+        def testfn_cnt(parser, seen_actions, *vargs, **kwargs):
+            "nand()"
+            # not(and(...))
+            # or(not(),not()...) - at least one is not present
+            cnt = self.count_actions(parser, seen_actions, *vargs, **kwargs)
+            if cnt==len(self._group_actions):
+                msg = 'one of (%s) must be absent'
+            elif cnt==0:
+                msg = None # ?
+            else:
+                msg = None
+            # what differences does self.required make?
+            self.log('NAND (%s) %s'%(cnt, [a.dest for a in self._group_actions]))
+            if msg:
+                self.raise_error(parser, msg)
+            return True
+
+        def testfn(parser, seen_actions, *vargs, **kwargs):
+            "nand()"
+            # test with shortcircuiting
+            # what effect should require have?
+            # if require, there must be atleast one seen action?
+            group_actions = self._group_actions
+            dest_list = [a.dest for a in group_actions]
+            result = False
+            errors = []
+            for a in group_actions:
+                if isinstance(a, Action):
+                    if a in seen_actions:
+                        continue
+                    else:
+                        result = True
+                        break
+                elif isinstance(a, UsageGroup):
+                    result1 = self.eval_nested_test(a.testfn, errors, parser, seen_actions, *vargs, **kwargs)
+                    """
+                    try:
+                        result1 = a.testfn(parser, seen_actions, *vargs, **kwargs)
+                    except GroupError as e:
+                        err = _sys.exc_info()[1]
+                        errors.append(str(err))
+                        result1 = False
+                    """
+                    if result1:
+                        continue
+                    else:
+                        result = True
+                        break
+                else:
+                    pass # error action type unknown
+            self.log('nand testing (%s) %s'%(result, dest_list))
+            if not result:
+                msg = 'one of %s must be absent'
+                self.raise_error(parser, msg)
+            return result  # True
+
+        self.testfn = testfn
+        if self.dest is None:
+            self.dest = self.testfn.__doc__
 
 
 class ArgumentParser(_AttributeHolder, _ActionsContainer):
@@ -1686,6 +2656,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
             formatter = self._get_formatter()
             positionals = self._get_positional_actions()
             groups = self._mutually_exclusive_groups
+            # append usage_groups?
             formatter.add_usage(self.usage, positionals, groups, '')
             kwargs['prog'] = formatter.format_help().strip()
 
@@ -1768,6 +2739,7 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # they can't occur with
         action_conflicts = {}
         for mutex_group in self._mutually_exclusive_groups:
+            # may deactivate with UsageGroups
             group_actions = mutex_group._group_actions
             for i, mutex_action in enumerate(mutex_group._group_actions):
                 conflicts = action_conflicts.setdefault(mutex_action, [])
@@ -2002,6 +2974,8 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                     msg = _('one of the arguments %s is required')
                     self.error(msg % ' '.join(names))
 
+        self.test_usage(seen_non_default_actions, seen_actions, namespace, extras)
+
         # return the updated namespace and the extra arguments
         return namespace, extras
 
@@ -2214,6 +3188,50 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # return the pattern
         return nargs_pattern
 
+    def test_usage(self, seen_non_default_actions, seen_actions, namespace, extras):
+        """collect and run the UsageGroup tests
+        'independent' tests will all be run"""
+        errors = []
+        for testfn in self._get_usage_tests():
+            try:
+                testfn(self, seen_non_default_actions, seen_actions, namespace, extras)
+            except GroupError as e:
+                err = _sys.exc_info()[1]
+                errors.append(str(err))
+        if errors:
+            if len(errors)==1:
+                #self._print_message('... RAISING ONE USAGE ERROR\n')
+                self.error(errors[0])
+            else:
+                msgs = '\n'.join(errors)
+                self.error('multiple usage errors: \n%s'%msgs)
+                self.error('%s usage errors encountered'%len(errors))
+
+    def _get_usage_tests(self):
+        # fetch a list (possibly empty) of tests to be run at the end of parsing
+        # possible sources:
+        # _mutually_exclusive_groups list (can this play nicely with existing MXG?)
+        # new _usage_groups list
+        # _registries['usage_tests']
+
+        tests1 = [x for x in self._mutually_exclusive_groups if isinstance(x, UsageGroup)]
+        if tests1:
+            self._print_message('... meg list %s\n'%[x.get_name() for x in tests1])
+
+        tests2 = self._registries.get('usage_tests', None)
+        if tests2:
+            tests2 = tests2.values()
+            if tests2:
+                self._print_message('... registries %s\n'%[x.get_name() for x in tests2])
+
+        tests3 = self._usage_groups
+        if tests3:
+            self._print_message('... usage list %s\n'%[x.get_name() for x in tests3])
+
+        tests = tests3
+        return tests
+
+
     # ========================
     # Value conversion methods
     # ========================
@@ -2308,16 +3326,24 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
     # =======================
     def format_usage(self):
         formatter = self._get_formatter()
+        if isinstance(formatter, UsageGroupHelpFormatter):
+            groups = self._mutually_exclusive_groups + self._usage_groups
+        else:
+            groups = self._mutually_exclusive_groups
         formatter.add_usage(self.usage, self._actions,
-                            self._mutually_exclusive_groups)
+                            groups)
         return formatter.format_help()
 
     def format_help(self):
         formatter = self._get_formatter()
 
         # usage
+        if isinstance(formatter, UsageGroupHelpFormatter):
+            groups = self._mutually_exclusive_groups + self._usage_groups
+        else:
+            groups = self._mutually_exclusive_groups
         formatter.add_usage(self.usage, self._actions,
-                            self._mutually_exclusive_groups)
+                            groups)
 
         # description
         formatter.add_text(self.description)
