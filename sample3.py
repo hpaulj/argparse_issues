@@ -23,11 +23,10 @@ argument group (and a 'multiple' boolean).
 
 """
 
-import argparse
+import argparse, sys
 
 def display(p):
     # custom display of a parser and its actions
-    print()
     print(p.prog, id(p))
     print('  option_strings:', p._option_string_actions.keys())
     print('  groups:',[(g.title, id(g)) for g in p._action_groups])
@@ -36,6 +35,7 @@ def display(p):
         containers = getattr(a,'containers',None)
         if containers:
             print('       containers:',[(g[0].prog, g[1].title, id(g[1])) for g in containers])
+    print()
 
 
 def _handle_conflict_parent(self, new_action, conflicting_actions):
@@ -50,7 +50,7 @@ def _handle_conflict_parent(self, new_action, conflicting_actions):
         container = action.container
         containers = getattr(action, 'containers', None)
         if containers is None:
-            return False, container
+            return 1, container
         print('    containers:',[(id(pg[0]), id(pg[1])) for pg in containers])
         found = False
         for parser, group in containers:
@@ -64,32 +64,47 @@ def _handle_conflict_parent(self, new_action, conflicting_actions):
         if found:
             print('    parser:',id(parser), parser.prog)
         else:
-            raise ValueError('cannot find matching argument_group')
-        return found, container
+            return len(containers), None
+            # raise ValueError('cannot find matching argument_group: {0.title!r}'.format(self))
+        return len(containers), container
+
+    def remove_action(action, container):
+        # remove action from container
+        # also remove container from action's containers list
+        container._remove_action(action)
+        if hasattr(action, 'containers'):
+            for i, g in enumerate(action.containers):
+                if g[1] is container:
+                    del action.containers[i]
+                    print('    deleted container: {0[0].prog!r}'.format(g))
+                    break
 
     print("conflict call group: {0.title!r}, {1}; action:{2.dest!r}".format(self, id(self), new_action))
     for option_string, action in conflicting_actions:
-        multiple, container = find_parser(self, action)
-        if multiple:
+        print("  conflicting: {0!r} {1.dest!r}".format(option_string, action))
+        count, container = find_parser(self, action)
+        if container is None:
+            print('  no matching parser')
+            continue
+        if count>1:
             # this action is found in multiple containers (groups), probably via parent(s)
             # remove it and its option_strings; do not alter the action (or other parsers)
             if action in container._actions:
-                container._remove_action(action)
+                remove_action(action, container)
                 for s in action.option_strings:
                     self._option_string_actions.pop(s, None)
                 print("    removed action: '{0.title}({1}):{2.dest}'".format(container, id(container), action))
                 print('    removed strings:', action.option_strings)
             else:
                 pass # already removed
-        else:
+        else:  # count==1
             # action is in only one container; it is safe to perform a partial removal
             # remove just the conflicting option_strings
-            print('using resolve: ', action.dest, new_action.dest)
+            print('  using resolve: ', action.dest, new_action.dest)
             action.option_strings.remove(option_string)
             self._option_string_actions.pop(option_string, None)
             if not action.option_strings:
-                # remove the action itself if not strings are left
-                container._remove_action(action)
+                remove_action(action, container)
 
 # handlers are methods of the Container class (not of the parser)
 # adding a custom handler is messier than adding custom types or action
@@ -143,75 +158,86 @@ def _add_container_actions(self, container):
 
 argparse._ActionsContainer._add_container_actions = _add_container_actions
 
-parent = argparse.ArgumentParser(add_help=False, prog='PARENT',
-    conflict_handler='parent')
-g = parent.add_argument_group(title='group',description='parent group')
-g.add_argument('-o','--opt', '--other', default='parent',
-    help='parent opt', dest='parent_opt', metavar='Opt')
-g.add_argument('-f', '--foo', help='parent help')
-# g.add_argument('-f', '--foobar')  # does a resolve here
+if __name__ == '__main__':
+    parent = argparse.ArgumentParser(add_help=False, prog='PARENT',
+                conflict_handler='parent')
+    parent_group = parent.add_argument_group(title='group')#,description='parent group')
+    parent_opt = parent_group.add_argument('-o','--opt', '--other', default='parent',
+                help='parent opt', dest='parent_opt', metavar='Opt')
+    parent_foo = parent_group.add_argument('-f', '--foo', help='parent help')
+    # parent_group.add_argument('-f', '--foobar')  # does a resolve here
 
-# parent.add_argument('pos', help='parent help')
-display(parent)
+    # parent.add_argument('pos', help='parent help')
+    display(parent)
 
-parser = argparse.ArgumentParser(prog='PROG')
-sp = parser.add_subparsers(dest='cmd')
-print('subparser cmd1 inherit from parent:')
-sp1 = sp.add_parser('cmd1', parents=[parent], conflict_handler='parent')
-sp1.add_argument('--opt','-o', default='parser', help='sp1 opt')
-# this --opt overrides the --opt from parent - but they are in diff groups
+    parser = argparse.ArgumentParser(prog='PROG')
+    sp = parser.add_subparsers(dest='cmd')
+    print('subparser cmd1 inherit from parent:')
+    cmd1 = sp.add_parser('cmd1', parents=[parent], conflict_handler='parent')
+    cmd1_opt = cmd1.add_argument('--opt','-o', default='parser', help='cmd1 opt')
+    # this --opt overrides the --opt from parent - but they are in diff groups
 
-# sp1.add_argument('--foo', help='sp1 help')
-# sp1.add_argument('pos', help='sp1 help')
-sp1.add_argument('-o', '--orange') # partial conflict
+    # cmd1.add_argument('--foo', help='cmd1 help')
+    # cmd1.add_argument('pos', help='cmd1 help')
+    cmd1.add_argument('-o', '--orange') # partial conflict
 
-print('add foobar to parent:')
-foobar = g.add_argument('-f', '--foobar')  # try changing parent between uses
-# does a replace here, because --foo now is in 2 containers (original parent and cmd1)
+    print('add foobar to parent:')
+    foobar = parent_group.add_argument('-f', '--foobar')  # try changing parent between uses
+    # does a replace here, because --foo now is in 2 containers (original parent and cmd1)
+    assert len(parent_foo.containers)==1  # removed from parent, left in cmd1
 
-print('subparser cmd2 inherit from parent')
-sp2 = sp.add_parser('cmd2', parents=[parent])
 
-# try an 'out of order' conflict
-# ensure it is changing the correct parser
-sp1.add_argument('--foo', help='sp1 help')
+    print('subparser cmd2 inherit from parent')
+    cmd2 = sp.add_parser('cmd2', parents=[parent])
 
-assert len(parent._actions)==2, 'parent should have "parent_opt", "foobar" actions'
-assert len(sp1._actions)==4  # help, opt, orange, foo
-assert len(sp2._actions)==3  # help, parent_opt, foobar
-assert all([a in sp2._actions for a in parent._actions])
-# all parent's have been copied to cmd2
-assert all([a not in sp1._actions for a in parent._actions])
-# all parent's have been overridden in cmd1
-assert len(foobar.containers)==2
+    # try an 'out of order' conflict
+    # ensure it is changing the correct parser
+    # with partial resolve, -f for parent_foo, --foo for this
+    #
+    display(cmd1)
+    print('add foo to cmd1')
+    cmd1.add_argument('-f', '--foo', help='cmd1 help')
 
-args = parser.parse_args(['cmd1'])
-expt = argparse.Namespace(cmd='cmd1', foo=None, opt='parser', orange=None)
-assert args == expt
-args = parser.parse_args(['cmd2'])
-expt = argparse.Namespace(cmd='cmd2', foobar=None, parent_opt='parent')
-assert args == expt
+    assert len(parent._actions)==2, 'parent should have "parent_opt", "foobar" actions'
+    print('cmd1 actions:', len(cmd1._actions))  # help, opt, orange, foo
+    assert len(cmd2._actions)==3  # help, parent_opt, foobar
+    assert all([a in cmd2._actions for a in parent._actions])
+    # all parent's have been copied to cmd2
+    assert all([a not in cmd1._actions for a in parent._actions])
+    # all parent's have been overridden in cmd1
+    assert len(foobar.containers)==2
+    assert len(parent_opt.containers)==2 # parent, cmd2
+    # this should have been removed from cmd1
+    print('parent_foo containers:', len(parent_foo.containers))
+    print([(g[0].prog, g[1].title) for g in parent_foo.containers])
+    # parent_foo should have no containers - it's been deleted from all, and
+    # now only exists as this global variable
 
-display(parent)
+    args = parser.parse_args(['cmd1'])
+    expt = argparse.Namespace(cmd='cmd1', foo=None, opt='parser', orange=None)
+    assert args == expt
+    args = parser.parse_args(['cmd2'])
+    expt = argparse.Namespace(cmd='cmd2', foobar=None, parent_opt='parent')
+    assert args == expt
 
-display(sp1)
-display(sp2)
-display(parser)
+    display(parent)
 
-print()
-print(parser.parse_args())
+    display(cmd1)
+    display(cmd2)
+    display(parser)
+
+    print()
+    print(parser.parse_args())
 
 """
 usage: PROG cmd1 [-h] [--opt OPT] [-o ORANGE] [--foo FOO]
 
 optional arguments:
   -h, --help            show this help message and exit
-  --opt OPT             sp1 opt
+  --opt OPT             cmd1 opt
   -o ORANGE, --orange ORANGE
-  --foo FOO             sp1 help
+  --foo FOO             cmd1 help
 
-group:
-  parent group
 ------------------
 usage: PROG cmd2 [-h] [-o Opt] [-f FOOBAR]
 
