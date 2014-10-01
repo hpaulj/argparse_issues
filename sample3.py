@@ -124,6 +124,8 @@ def _handle_conflict_parent(self, new_action, conflicting_actions):
 # adding a custom handler is messier than adding custom types or action
 argparse._ActionsContainer._handle_conflict_parent = _handle_conflict_parent
 
+
+
 def _handle_conflict_resolve(self, new_action, conflicting_actions):
     logger = logging.getLogger('Resolver')
     logger.info("conflict call group: {0.title!r}, {1}; action:{2.dest!r}".format(self, id(self), new_action))
@@ -223,6 +225,110 @@ def action_copy(self):
     return action
 argparse.Action.copy = action_copy # add to base Action class
 
+def remove_argument(self, action):
+    # remove an action from self
+    # self is an argument_group (or if parser, the relevant group)
+    # action should be Action object
+    # but may also deduce it from an option_string or dest
+    logger = logging.getLogger('Remove')
+    def find_parser(self, action):
+        # find 'action' container that is in the same parser as 'self'
+        # returns 'multiple' boolean, correct container (group)
+        container = action.container
+        containers = getattr(action, 'containers', None)
+        if containers is None:
+            return 1, container, None
+        logger.info('    containers: {}'.format([(id(pg[0]), id(pg[1])) for pg in containers]))
+        found = False
+        for parser, group in containers:
+            if self in parser._action_groups:
+                # shared parser, the correct group
+                if group is not action.container:
+                    logger.info('    changing container')
+                    container = group
+                found = True
+                break
+        if found:
+            logger.info('    parser: {} {}'.format(id(parser), parser.prog))
+        else:
+            return len(containers), None, None
+        return len(containers), container, parser
+
+    def remove_action(action, container):
+        # remove action from container
+        # also remove container from action's containers list
+        container._remove_action(action)
+        if hasattr(action, 'containers'):
+            for i, g in enumerate(action.containers):
+                if g[1] is container:
+                    del action.containers[i]
+                    if len(action.containers)>0:
+                        logger.info('    deleted container: {0[0].prog!r} from {1}'.format(g, id(action)))
+                    break
+            if len(action.containers)>0 and not action.option_strings:
+                # correct use of resolve should prevent this error
+                assert False, 'Action in parser with no option_strings'
+
+    if isinstance(action, argparse.Action):
+        pass
+    else:
+        option_string = action
+        if option_string[0]=='-':  # use prefix chars
+            action = self._option_string_actions[option_string]
+            # keyerror if string not found
+        else:
+            pass # look for 'dest' (e.g. positional match)
+            x = [a for a in self._actions if a.dest==option_string]
+            if x:
+                action = x[0]
+            else:
+                raise ValueError('action not found')
+
+    if not hasattr(self, '_group_actions'):
+        # self is parser, not group
+        # can use find_parser, using one of self's own groups as reference
+        count, container, parser = find_parser(self._action_groups[0], action)
+        # ValueError if action not found; i.e. already removed
+        if container is None:
+            raise ValueError('action not found in containers')
+        assert parser is self or parser is None
+    else:
+        container = self
+        assert isinstance(container, argparse._ArgumentGroup)
+
+    logger.info("group: {0.title!r}, {1}; action:{2.dest!r} {3}".format(container, id(container), action, id(action)))
+
+    if action.option_strings:
+        option_string = action.option_strings[0]
+    else:
+        # positional
+        option_string = None
+    logger.info("  removing: {0!r} {1.dest!r}".format(option_string, action))
+    count, container1, parser = find_parser(container, action)
+    if container is not container1:
+        logger.warn('change container')
+        container = container1
+    if container is None:
+        #logger.info('  no matching parser')
+        raise ValueError('no matching parser')
+
+    remove_action(action, container)
+    for s in action.option_strings:
+        self._option_string_actions.pop(s, None)
+    logger.info("    removed action: '{0.title}({1}):{2.dest}'".format(container, id(container), action))
+    logger.info('    removed strings:{}'.format(action.option_strings))
+
+# argparse._ArgumentGroup.remove_argument = remove_argument
+argparse._ActionsContainer.remove_argument = remove_argument
+# usable by both parser and argumentgroup
+# (or should parser version be different?
+# remove_argument
+# a group already has _remove_action
+# which removes it from _group_actions list and _actions list
+# but it does not remove it from _option_string_actions - resolve does that
+# thats part of what this has to add
+
+
 def define(args):
     # create a parser with subparsers and parent
     # a complex mix of argument conflicts
@@ -264,23 +370,60 @@ def define(args):
     print('\nsubparser cmd2 inherit from parent')
     cmd2 = sp.add_parser('cmd2', parents=[parent])
 
+    if args.try_remove:
+        # remove an optional, from group or parser;
+        # can specify action by reference or option_string
+        print('remove foobar from cmd2')
+        grp = cmd2._action_groups[2]
+        #grp.remove_argument(foobar)
+        #cmd2.remove_argument(foobar)
+        cmd2.remove_argument('-f')
+        #cmd2.remove_argument('--foobar')
+
+        # also works for postional
+        pos = cmd2.add_argument('pos')
+        print(cmd2.format_usage())
+        #cmd2.remove_argument(pos)
+        #cmd2._action_groups[0].remove_argument(pos) # works
+        #cmd2._action_groups[0].remove_argument('pos')
+        cmd2.remove_argument('pos')
+        print(cmd2.format_usage())
+
+        # raise error if not action not found
+        # should it consolidate error messages?
+        #cmd2.remove_argument(foobar) # action not found in group
+        #grp.remove_argument(foobar) # no matching parser
+        #cmd2.remove_argument('bar') # action not found
+        #cmd2.remove_argument('--bar') # key error
+
+        # next - remove_argument for 'copy' case, or where it is safe to
+        # i.e. w/o containers?
+
     # try an 'out of order' conflict
     # ensure it is changing the correct parser
     # with partial resolve, -f for parent_foo, --foo for this
     #
+    """
     debug_parser(cmd1)
     print('\nadd foo to cmd1')
     cmd1.add_argument('-f', '--foo', help='cmd1 help')
-
+    """
     if not do_copy:
         assert len(parent._actions)==2, 'parent should have "parent_opt", "foobar" actions'
         assert len(cmd1._actions)==4, "[help, opt, orange, foo]"
-        assert len(cmd2._actions)==3  # help, parent_opt, foobar
-        assert all([a in cmd2._actions for a in parent._actions])
+        if args.try_remove:
+            # cmd2 remove foobar
+            assert len(cmd2._actions)==2, [a.dest for a in cmd2._actions]  # help, parent_opt
+            assert len(cmd2._option_string_actions.keys())==5, cmd2._option_string_actions.keys()
+        else:
+            assert len(cmd2._actions)==3, [a.dest for a in cmd2._actions]  # help, parent_opt, foobar
+            assert all([a in cmd2._actions for a in parent._actions])
+            assert len(foobar.containers)==2
+            assert len(cmd2._option_string_actions.keys())==7, cmd2._option_string_actions.keys()
         # all parent's have been copied to cmd2
         assert all([a not in cmd1._actions for a in parent._actions])
         # all parent's have been overridden in cmd1
-        assert len(foobar.containers)==2
+
         assert len(parent_opt.containers)==2 # parent, cmd2
         # this should have been removed from cmd1
         print('parent_foo containers:', len(parent_foo.containers))
@@ -315,7 +458,10 @@ def parse(opts, argv, parsers):
     args = parser.parse_args(['cmd2'])
     if lvl<30: print(args)
     if not do_copy:
-        expt = argparse.Namespace(cmd='cmd2', foobar=None, parent_opt='parent')
+        if opts.try_remove:
+            expt = argparse.Namespace(cmd='cmd2', parent_opt='parent')
+        else:
+            expt = argparse.Namespace(cmd='cmd2', foobar=None, parent_opt='parent')
     else:
         expt = argparse.Namespace(cmd='cmd2', foo=None, foobar=None, parent_opt='parent')
     assert args == expt
@@ -332,6 +478,7 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(prog='main')
     p.add_argument('-c','--do_copy', action='store_true', help='copy actions from parent')
     h=p.add_argument('--handler', choices={'error','resolve','parent'}, default='parent')
+    p.add_argument('-r','--try_remove', action='store_true')
     p.add_argument('-l','--logging', type=int, default=40, help='logging level, smaller means more')
     args, rest = p.parse_known_args()
 

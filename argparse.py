@@ -821,6 +821,14 @@ class Action(_AttributeHolder):
     def __call__(self, parser, namespace, values, option_string=None):
         raise NotImplementedError(_('.__call__() not defined'))
 
+    def copy(self):
+        # return a copy that can be changed without affecting self
+        action = _copy.copy(self)
+        action.option_strings = self.option_strings.copy()
+        # any other attributes need to copied?  Most are strings
+        # default and choices are user defined
+        return action
+
 
 class _StoreAction(Action):
 
@@ -1412,8 +1420,14 @@ class _ActionsContainer(object):
                 group_map[action] = mutex_group
 
         # add all actions to this container or their group
+        action_copy = getattr(self._get_handler(),'action_copy',False)
+        # does the conflict handler want action copies?
         for action in container._actions:
-            group_map.get(action, self)._add_action(action)
+            if action_copy:
+                print('copying', action.dest)
+                group_map.get(action, self)._add_action(action.copy())
+            else:
+                group_map.get(action, self)._add_action(action)
 
     def _get_positional_kwargs(self, dest, **kwargs):
         # make sure required is not specified
@@ -1516,7 +1530,7 @@ class _ActionsContainer(object):
             # container holding it
             if not action.option_strings:
                 action.container._remove_action(action)
-
+    _handle_conflict_resolve.action_copy = True
 
 class _ArgumentGroup(_ActionsContainer):
 
