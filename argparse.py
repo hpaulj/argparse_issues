@@ -1089,8 +1089,12 @@ class _SubParsersAction(Action):
             choice_action = self._ChoicesPseudoAction(name, aliases, help)
             self._choices_actions.append(choice_action)
 
-        # create the parser and add it to the map
-        parser = self._parser_class(**kwargs)
+        parser = kwargs.pop('parser', None)
+        # allow use of pre-existing parser
+        # could check that it is valid, e.g. isinstance(parse, ArgumentParser)
+        if parser is None:
+            # create the parser and add it to the map
+            parser = self._parser_class(**kwargs)
         self._name_parser_map[name] = parser
 
         # make parser available under aliases also
